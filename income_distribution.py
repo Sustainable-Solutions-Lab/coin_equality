@@ -523,16 +523,26 @@ def find_Fmax(Fmin,
             branch=branch,
         )
 
-    # Bracket Fmax between Fmin and something close to 1
+    # For extremely small target_tax (relative to mean income), Fmax must be very close to 1
+    # where the Pareto distribution is singular. In this case, just return value close to 1.
+    if target_tax < EPSILON * y_mean_before_damage:
+        return 1.0 - EPSILON
+
+    # Bracket Fmax between Fmin and just below 1 (to avoid Pareto singularity at F=1)
     left = Fmin
-    right = 0.999999
+    right = 1.0 - EPSILON
 
     f_left = f(left)
     f_right = f(right)
 
     if f_left * f_right > 0:
         raise RuntimeError(
-            f"Root not bracketed: total_tax_top(Fmin)={f_left}, total_tax_top(0.999999)={f_right}"
+            f"Root not bracketed: total_tax_top(Fmin)={f_left}, total_tax_top({right})={f_right}\n"
+            f"  Fmin={Fmin}\n"
+            f"  target_tax={target_tax}\n"
+            f"  y_mean_before_damage={y_mean_before_damage}\n"
+            f"  omega_base={omega_base}\n"
+            f"  uniform_redistribution={uniform_redistribution}"
         )
 
     sol = root_scalar(f, bracket=[left, right], method="brentq", xtol=tol)
@@ -601,6 +611,11 @@ def find_Fmin(y_mean_before_damage,
             target_subsidy=target_subsidy,
             branch=branch,
         )
+
+    # For extremely small target_subsidy (relative to mean income), Fmin must be very close to 0.
+    # In this case, just return a value close to 0.
+    if target_subsidy < EPSILON * y_mean_before_damage:
+        return EPSILON
 
     # Bracket Fmin between 0 and something less than 1
     left = 0.0
