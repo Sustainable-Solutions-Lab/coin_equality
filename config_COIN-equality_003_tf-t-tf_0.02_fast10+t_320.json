@@ -1,5 +1,5 @@
 {
-    "run_name": "COIN-equality_003_tf-f-tt_0.02_fast10+t_320",
+    "run_name": "COIN-equality_003_tf-t-tf_0.02_fast10+t_320",
     "description": "Testing options under constrained conditions",
     "scalar_parameters": {
         "alpha": 0.3,
@@ -34,11 +34,11 @@
         "_income_dependent_damage_distribution": "If true, damage weighted towards low-income (uses y_damage_distribution_exponent and y_net_reference)",
         "income_dependent_aggregate_damage": false,
         "_income_dependent_aggregate_damage": "Subswitch of income_dependent_damage_distribution: If false, aggregate damage is fixed and distribution adjusted to match; if true, aggregate damage decreases as world gets richer",
-        "income_dependent_tax_policy": false,
+        "income_dependent_tax_policy": true,
         "_income_dependent_tax_policy": "If true, progressive tax (tax richest); if false, uniform fractional tax",
         "income_redistribution": true,
         "_income_redistribution": "If true, enable redistribution; if false, no redistribution (all revenues to abatement)",
-        "income_dependent_redistribution_policy": true,
+        "income_dependent_redistribution_policy": false,
         "_income_dependent_redistribution_policy": "Subswitch of income_redistribution. If true, targeted to lowest income; if false, uniform dividend"
     },
     "time_functions": {

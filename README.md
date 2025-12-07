@@ -1451,6 +1451,45 @@ print(f"Results saved to: {output_paths['output_dir']}")
 
 See the **Testing the Forward Model** section above for detailed instructions on using `test_integration.py`.
 
+### Comparing Multiple Runs
+
+The `plot_combined_results.py` utility creates combined PDF reports showing multiple optimization runs overlaid on the same plots for easy comparison.
+
+**Usage:**
+
+```bash
+# Compare all runs matching a pattern
+python plot_combined_results.py "data/output/COIN-equality_003_tt-*"
+
+# Compare specific runs
+python plot_combined_results.py data/output/run1 data/output/run2 data/output/run3
+
+# Specify custom output file
+python plot_combined_results.py --output my_comparison.pdf "data/output/COIN*"
+```
+
+**Output:**
+- Creates `plots_full_combined.pdf` (or custom name with `--output`)
+- Each panel shows all runs as different colored lines
+- Includes a legend panel on each page identifying all cases
+- Uses the same plot layout as individual run PDFs for consistency
+
+**Examples:**
+
+```bash
+# Compare all runs with different tax policies (tt vs tf vs ff)
+python plot_combined_results.py "data/output/*-t-t*" "data/output/*-t-f*" "data/output/*-f-f*"
+
+# Compare all completed runs
+python plot_combined_results.py "data/output/*/results.csv"
+```
+
+The utility automatically:
+- Searches for `results.csv` files in specified paths
+- Handles glob patterns (use quotes around patterns with `*`)
+- Names cases using their parent directory names
+- Handles duplicate names by appending numbers
+
 ## Optimization Configuration
 
 The JSON configuration uses iterative refinement optimization through the `optimization_parameters` section.
