@@ -1,5 +1,5 @@
 {
-    "run_name": "COIN-equality_003_ff-t-tt_0.02_fast10+t_320",
+    "run_name": "COIN-equality_003_tt-f-tt.02_fast10+t_320",
     "description": "Testing options under constrained conditions",
     "scalar_parameters": {
         "alpha": 0.3,
@@ -30,15 +30,15 @@
         "_y_net_reference": "Reference net income level ($) for income-dependent damage calculation. Typically set to current global average net income.",
         "y_damage_distribution_exponent": 0.50,
         "_y_damage_distribution_exponent": "Exponent for income-dependent damage distribution.",
-        "income_dependent_damage_distribution": false,
+        "income_dependent_damage_distribution": true,
         "_income_dependent_damage_distribution": "If true, damage weighted towards low-income (uses y_damage_distribution_exponent and y_net_reference)",
-        "income_dependent_aggregate_damage": false,
+        "income_dependent_aggregate_damage": true,
         "_income_dependent_aggregate_damage": "Subswitch of income_dependent_damage_distribution: If false, aggregate damage is fixed and distribution adjusted to match; if true, aggregate damage decreases as world gets richer",
-        "income_dependent_tax_policy": true,
+        "income_dependent_tax_policy": false,
         "_income_dependent_tax_policy": "If true, progressive tax (tax richest); if false, uniform fractional tax",
-        "income_redistribution": true,
+        "income_redistribution": false,
         "_income_redistribution": "If true, enable redistribution; if false, no redistribution (all revenues to abatement)",
-        "income_dependent_redistribution_policy": true,
+        "income_dependent_redistribution_policy": false,
         "_income_dependent_redistribution_policy": "Subswitch of income_redistribution. If true, targeted to lowest income; if false, uniform dividend"
     },
     "time_functions": {

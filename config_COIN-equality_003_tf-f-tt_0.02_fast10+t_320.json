@@ -1,5 +1,5 @@
 {
-    "run_name": "COIN-equality_003_tf-f-tf_0.02_fast10+t_320",
+    "run_name": "COIN-equality_003_tf-f-tt.02_fast10+t_320",
     "description": "Testing options under constrained conditions",
     "scalar_parameters": {
         "alpha": 0.3,

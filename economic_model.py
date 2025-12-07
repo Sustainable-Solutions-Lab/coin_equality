@@ -406,7 +406,12 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
     y_damaged = y_gross * (1 - Omega)  # per capita gross production after climate damage
 
     AbateCost = abateCost_amount * L  # total abatement cost
-    Lambda = AbateCost / Y_damaged  # Eq 1.7: Abatement cost as fraction of damaged production  
+    # Eq 1.7: Abatement cost as fraction of damaged production
+    # If Y_damaged is 0 (catastrophic climate damage), set Lambda = 1 (not in optimal state)
+    if Y_damaged == 0:
+        Lambda = 1.0
+    else:
+        Lambda = AbateCost / Y_damaged  
 
     Y_net = Y_damaged - AbateCost # Eq 1.8: Net production after abatement cost
     y_net = y_damaged - abateCost_amount  # Eq 1.9: per capita income after abatement cost

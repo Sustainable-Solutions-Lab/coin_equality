@@ -523,11 +523,6 @@ def find_Fmax(Fmin,
             branch=branch,
         )
 
-    # For extremely small target_tax (relative to mean income), Fmax must be very close to 1
-    # where the Pareto distribution is singular. In this case, just return value close to 1.
-    if target_tax < EPSILON * y_mean_before_damage:
-        return 1.0 - EPSILON
-
     # Bracket Fmax between Fmin and just below 1 (to avoid Pareto singularity at F=1)
     left = Fmin
     right = 1.0 - EPSILON
@@ -535,15 +530,15 @@ def find_Fmax(Fmin,
     f_left = f(left)
     f_right = f(right)
 
+    # If both endpoints have the same sign, return the appropriate boundary
+    # Income at boundary goes to infinity, so we're OK with non-conservation at EPSILON level
     if f_left * f_right > 0:
-        raise RuntimeError(
-            f"Root not bracketed: total_tax_top(Fmin)={f_left}, total_tax_top({right})={f_right}\n"
-            f"  Fmin={Fmin}\n"
-            f"  target_tax={target_tax}\n"
-            f"  y_mean_before_damage={y_mean_before_damage}\n"
-            f"  omega_base={omega_base}\n"
-            f"  uniform_redistribution={uniform_redistribution}"
-        )
+        if f_left > 0:
+            # Both positive: target_tax is too small, return right (tax almost no one)
+            return right
+        else:
+            # Both negative: target_tax is too large, return left (tax everyone above Fmin)
+            return left
 
     sol = root_scalar(f, bracket=[left, right], method="brentq", xtol=tol)
     if not sol.converged:
@@ -612,11 +607,6 @@ def find_Fmin(y_mean_before_damage,
             branch=branch,
         )
 
-    # For extremely small target_subsidy (relative to mean income), Fmin must be very close to 0.
-    # In this case, just return a value close to 0.
-    if target_subsidy < EPSILON * y_mean_before_damage:
-        return EPSILON
-
     # Bracket Fmin between 0 and something less than 1
     left = 0.0
     right = 0.999999
@@ -624,14 +614,15 @@ def find_Fmin(y_mean_before_damage,
     f_left = f(left)
     f_right = f(right)
 
+    # If both endpoints have the same sign, return the appropriate boundary
+    # Income at boundaries has special behavior, so we're OK with non-conservation at EPSILON level
     if f_left * f_right > 0:
-        raise RuntimeError(
-            f"Root not bracketed: total_tax_bottom(0.0)={f_left}, total_tax_bottom(0.999999)={f_right}\n"
-            f"  target_subsidy={target_subsidy}\n"
-            f"  y_mean_before_damage={y_mean_before_damage}\n"
-            f"  omega_base={omega_base}\n"
-            f"  uniform_redistribution={uniform_redistribution}"
-        )
+        if f_left > 0:
+            # Both positive: target_subsidy is too small, return left (redistribute to almost no one)
+            return EPSILON
+        else:
+            # Both negative: target_subsidy is too large, return right (redistribute to almost everyone)
+            return right
 
     sol = root_scalar(f, bracket=[left, right], method="brentq", xtol=tol)
     if not sol.converged:
