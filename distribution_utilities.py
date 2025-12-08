@@ -380,78 +380,77 @@ def total_tax_bottom(
     return integral_val - target_subsidy
 
 
-def find_Fmax(
+def find_Fmax_analytical(
     Fmin,
-    y_mean_before_damage,
-    omega_base,
-    y_damage_distribution_exponent,
-    y_net_reference,
-    uniform_redistribution,
+    y_gross,
     gini,
-    xi,
-    wi,
-    target_tax=0.0,
-    branch=0,
+    damage_yi,
+    Fi_edges,
+    uniform_redistribution,
+    target_tax,
     tol=LOOSE_EPSILON,
 ):
     """
-    Find Fmax in [Fmin, 1) such that total_tax_top(Fmax) = target_tax.
+    Find Fmax in [Fmin, 1) such that progressive taxation yields target_tax.
 
-    Uses a bracketing root-finder.
+    Uses analytical Lorenz curve integration instead of numerical quadrature,
+    with stepwise interpolation for climate damage.
+
+    Tax revenue = ∫_{Fmax}^1 [y(F) - y(Fmax)] dF
+    where y(F) = y_gross * dL/dF(F) + uniform_redistribution - damage(F)
+
+    The tax simplifies to:
+    - Lorenz part: y_gross * [(1 - L(Fmax)) - (1 - Fmax) * dL/dF(Fmax)]
+    - Damage part: ∫_{Fmax}^1 damage(F) dF - (1 - Fmax) * damage(Fmax)
+    - Uniform redistribution cancels out
 
     Parameters
     ----------
     Fmin : float
-        Lower boundary for income distribution.
-    y_mean_before_damage : float
-        Mean income before damage.
-    omega_base : float
-        Base climate damage parameter.
-    y_damage_distribution_exponent : float
-        Damage distribution coefficient parameter.
-    uniform_redistribution : float
-        Uniform per-capita redistribution amount.
+        Lower boundary for income distribution (must have Fmin < Fmax).
+    y_gross : float
+        Gross income per capita before damage.
     gini : float
         Gini coefficient.
-    xi : ndarray
-        Gauss-Legendre quadrature nodes on [-1, 1].
-    wi : ndarray
-        Gauss-Legendre quadrature weights.
-    target_tax : float, optional
-        Target tax amount (default 0.0).
-    branch : int, optional
-        Lambert W branch (default 0).
+    damage_yi : ndarray
+        Damage values at quadrature points (length N).
+    Fi_edges : ndarray
+        Interval boundaries for stepwise damage (length N+1).
+    uniform_redistribution : float
+        Uniform per-capita redistribution amount.
+    target_tax : float
+        Target tax amount to collect.
     tol : float, optional
         Tolerance for root finding (default LOOSE_EPSILON).
 
     Returns
     -------
     float
-        Fmax value such that total_tax_top(Fmax) = target_tax.
+        Fmax value such that progressive taxation yields target_tax.
     """
-    # Define a wrapper with all parameters bound
-    def f(Fmax):
-        return total_tax_top(
-            Fmax,
-            Fmin,
-            y_mean_before_damage,
-            omega_base,
-            y_damage_distribution_exponent,
-            y_net_reference,
-            uniform_redistribution,
-            gini,
-            xi,
-            wi,
-            target_tax=target_tax,
-            branch=branch,
+    def tax_revenue_minus_target(Fmax):
+        # Lorenz contribution from Pareto distribution
+        lorenz_part = y_gross * (
+            (1.0 - L_pareto(Fmax, gini)) -
+            (1.0 - Fmax) * L_pareto_derivative(Fmax, gini)
         )
 
-    # Bracket Fmax between Fmin and just below 1 (to avoid Pareto singularity at F=1)
+        # Damage contribution using stepwise functions
+        damage_integral = stepwise_integrate(Fmax, 1.0, damage_yi, Fi_edges)
+        damage_at_Fmax = stepwise_interpolate(Fmax, damage_yi, Fi_edges)
+        damage_part = damage_integral - (1.0 - Fmax) * damage_at_Fmax
+
+        # Tax revenue (uniform redistribution cancels out)
+        tax_revenue = lorenz_part - damage_part
+
+        return tax_revenue - target_tax
+
+    # Bracket Fmax between Fmin and just below 1
     left = Fmin
     right = 1.0 - EPSILON
 
-    f_left = f(left)
-    f_right = f(right)
+    f_left = tax_revenue_minus_target(left)
+    f_right = tax_revenue_minus_target(right)
 
     # If both endpoints have the same sign, return the appropriate boundary
     if f_left * f_right > 0:
@@ -462,81 +461,80 @@ def find_Fmax(
             # Both negative: target_tax is too large, return left (tax everyone above Fmin)
             return left
 
-    sol = root_scalar(f, bracket=[left, right], method="brentq", xtol=tol)
+    sol = root_scalar(tax_revenue_minus_target, bracket=[left, right], method="brentq", xtol=tol)
     if not sol.converged:
-        raise RuntimeError("root_scalar did not converge for find_Fmax")
+        raise RuntimeError("root_scalar did not converge for find_Fmax_analytical")
 
     return sol.root
 
 
-def find_Fmin(
-    y_mean_before_damage,
-    omega_base,
-    y_damage_distribution_exponent,
-    y_net_reference,
-    uniform_redistribution,
+def find_Fmin_analytical(
+    y_gross,
     gini,
-    xi,
-    wi,
-    target_subsidy=0.0,
-    branch=0,
+    damage_yi,
+    Fi_edges,
+    uniform_redistribution,
+    target_subsidy,
     tol=LOOSE_EPSILON,
 ):
     """
-    Find Fmin in (0, 1) such that total_tax_bottom(Fmin) = target_subsidy.
+    Find Fmin in (0, 1) such that progressive redistribution yields target_subsidy.
 
-    Uses a bracketing root-finder.
+    Uses analytical Lorenz curve integration instead of numerical quadrature,
+    with stepwise interpolation for climate damage.
+
+    Subsidy amount = ∫_0^Fmin [y(Fmin) - y(F)] dF
+    where y(F) = y_gross * dL/dF(F) + uniform_redistribution - damage(F)
+
+    The subsidy simplifies to:
+    - Lorenz part: y_gross * [Fmin * dL/dF(Fmin) - L(Fmin)]
+    - Damage part: Fmin * damage(Fmin) - ∫_0^Fmin damage(F) dF
+    - Uniform redistribution cancels out
 
     Parameters
     ----------
-    y_mean_before_damage : float
-        Mean income before damage.
-    omega_base : float
-        Base climate damage parameter.
-    y_damage_distribution_exponent : float
-        Damage distribution coefficient parameter.
-    uniform_redistribution : float
-        Uniform per-capita redistribution amount.
+    y_gross : float
+        Gross income per capita before damage.
     gini : float
         Gini coefficient.
-    xi : ndarray
-        Gauss-Legendre quadrature nodes on [-1, 1].
-    wi : ndarray
-        Gauss-Legendre quadrature weights.
-    target_subsidy : float, optional
-        Target subsidy amount (default 0.0).
-    branch : int, optional
-        Lambert W branch (default 0).
+    damage_yi : ndarray
+        Damage values at quadrature points (length N).
+    Fi_edges : ndarray
+        Interval boundaries for stepwise damage (length N+1).
+    uniform_redistribution : float
+        Uniform per-capita redistribution amount.
+    target_subsidy : float
+        Target subsidy amount to distribute.
     tol : float, optional
         Tolerance for root finding (default LOOSE_EPSILON).
 
     Returns
     -------
     float
-        Fmin value such that total_tax_bottom(Fmin) = target_subsidy.
+        Fmin value such that progressive redistribution yields target_subsidy.
     """
-    # Define a wrapper with all parameters bound
-    def f(Fmin):
-        return total_tax_bottom(
-            Fmin,
-            y_mean_before_damage,
-            omega_base,
-            y_damage_distribution_exponent,
-            y_net_reference,
-            uniform_redistribution,
-            gini,
-            xi,
-            wi,
-            target_subsidy=target_subsidy,
-            branch=branch,
+    def subsidy_minus_target(Fmin):
+        # Lorenz contribution from Pareto distribution
+        lorenz_part = y_gross * (
+            Fmin * L_pareto_derivative(Fmin, gini) - L_pareto(Fmin, gini)
         )
+
+        # Damage contribution using stepwise functions
+        damage_integral = stepwise_integrate(0.0, Fmin, damage_yi, Fi_edges)
+        damage_at_Fmin = stepwise_interpolate(Fmin, damage_yi, Fi_edges)
+        damage_part = Fmin * damage_at_Fmin - damage_integral
+
+        # Subsidy amount (uniform redistribution cancels out)
+        subsidy_amount = lorenz_part + damage_part
+
+        return subsidy_amount - target_subsidy
 
     # Bracket Fmin between 0 and something less than 1
     left = 0.0
     right = 0.999999
 
-    f_left = f(left)
-    f_right = f(right)
+    f_left = subsidy_minus_target(left)
+    f_right = subsidy_minus_target(right)
 
     # If both endpoints have the same sign, return the appropriate boundary
     if f_left * f_right > 0:
@@ -547,9 +545,9 @@ def find_Fmin(
             # Both negative: target_subsidy is too large, return right (redistribute to almost everyone)
             return right
 
-    sol = root_scalar(f, bracket=[left, right], method="brentq", xtol=tol)
+    sol = root_scalar(subsidy_minus_target, bracket=[left, right], method="brentq", xtol=tol)
     if not sol.converged:
-        raise RuntimeError("root_scalar did not converge for find_Fmin")
+        raise RuntimeError("root_scalar did not converge for find_Fmin_analytical")
 
     return sol.root
 

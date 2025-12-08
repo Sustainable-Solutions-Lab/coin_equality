@@ -12,13 +12,15 @@ from distribution_utilities import (
     segment_integral_with_cut,
     total_tax_top,
     total_tax_bottom,
-    find_Fmax,
-    find_Fmin,
+    find_Fmax_analytical,
+    find_Fmin_analytical,
     L_pareto,
     L_pareto_derivative,
     crra_utility_interval,
     crra_utility_integral_with_damage,
-    climate_damage_integral
+    climate_damage_integral,
+    stepwise_interpolate,
+    stepwise_integrate
 )
 from parameters import evaluate_params_at_time
 from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, MAX_ITERATIONS, N_QUAD, INVERSE_EPSILON
@@ -228,31 +230,27 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
             # We want to find the value of Fmax such that if everyone above Fmax made
             # the same amount of money as people at Fmax, that would generate the right amount of tax revenue.
             # The piece of resources that would come from the Lorenz curve above Fmax is:
-            # lorenz_part = ygross *( (1 - L(Fmax)) - (1.0 - Fmax) * (d L/dF)@Fmax )
-            # damage_part = stepwise_interpolate(Fmax,climate_damage_yi_prev,Fi_edges)
+            # lorenz_part = y_gross *( (1 - L(Fmax)) - (1.0 - Fmax) * (d L/dF)@Fmax )
+            # damage_part = stepwise_integrate(Fmax, 1.0, climate_damage_yi_prev, Fi_edges) - (1 - Fmax) * stepwise_interpolate(Fmax, climate_damage_yi_prev, Fi_edges)
             # The challenge is to find Fmax such that:
-            # tax_amount = lorenz_part - damage_part 
+            # tax_amount = lorenz_part - damage_part
 
-            Fmax = find_Fmax(
-                Fmin, y_gross * (1 - uniform_tax_rate),
-                uniform_redistribution_amount, climate_damage_amount_yi, gini,
-                xi, xi_edges, wi, target_tax=tax_amount,
+            Fmax = find_Fmax_analytical(
+                Fmin, y_gross, gini, climate_damage_yi_prev, Fi_edges,
+                uniform_redistribution_amount, target_tax=tax_amount,
             )
-
         else:
             # Uniform tax
             uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega))
             Fmax = 1.0
 
-        # Find Fmin and Fmax using current Omega_base
+        # Find Fmin using current Omega_base
         # For income-dependent redistribution, find Fmin such that redistribution matches target
         if income_redistribution and income_dependent_redistribution_policy:
-            Fmin = invert_step_integral(Fi_edges, y_damaged_yi, yint)
             uniform_redistribution_amount = 0.0
-            Fmin =   find_Fmin(
-                y_gross * (1 - uniform_tax_rate), 
-                uniform_redistribution_amount, climate_damage_amount_yi, gini,
-                xi, xi_edges, wi, target_subsidy=redistribution_amount,
+            Fmin = find_Fmin_analytical(
+                y_gross, gini, climate_damage_yi_prev, Fi_edges,
+                0.0, target_subsidy=redistribution_amount,
             )
         else:
             # Uniform redistribution
