@@ -20,7 +20,7 @@ Redistribution Policies
 import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import bisect
-from income_distribution import L_pareto_derivative
+from distribution_utilities import L_pareto_derivative
 
 
 def y_post_damage(F, y_mean, G, damage_at_rank_fn):

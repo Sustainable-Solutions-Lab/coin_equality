@@ -35,7 +35,7 @@ def compute_redistribution_integral_lagged(
     Returns: integral from 0 to Fmin of [y(Fmin) - y(F)] dF
     where y uses lagged damage from previous timestep.
     """
-    from income_distribution import y_of_F_lagged_damage
+    from distribution_utilities import y_of_F_lagged_damage
 
     if Fmin_current < EPSILON:
         return 0.0
@@ -91,7 +91,7 @@ def compute_tax_integral_lagged(
     Returns: integral from Fmax to 1 of [y(F) - y(Fmax)] dF
     where y uses lagged damage from previous timestep.
     """
-    from income_distribution import y_of_F_lagged_damage
+    from distribution_utilities import y_of_F_lagged_damage
 
     if Fmax_current > 1.0 - EPSILON:
         return 0.0
@@ -256,7 +256,7 @@ def compute_damage_integral_lagged(
     Returns: integral from F0 to F1 of damage(F) dF
     where damage uses lagged income from previous timestep.
     """
-    from income_distribution import y_of_F_lagged_damage
+    from distribution_utilities import y_of_F_lagged_damage
 
     if F1 - F0 < EPSILON:
         return 0.0
@@ -287,7 +287,7 @@ def compute_damage_integral_lagged(
         # The damage is computed from previous income, which is what y_of_F_lagged_damage does
 
         # Reconstruct previous income to compute damage fraction
-        from income_distribution import y_of_F_after_damage
+        from distribution_utilities import y_of_F_after_damage
         y_prev_vals = y_of_F_after_damage(
             F_nodes, Fmin_prev, Fmax_prev,
             y_gross_prev, Omega_base_prev, y_damage_distribution_exponent,

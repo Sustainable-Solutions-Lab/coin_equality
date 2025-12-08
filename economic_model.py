@@ -7,32 +7,24 @@ and emissions abatement costs.
 
 import numpy as np
 from scipy.special import roots_legendre
-from income_distribution import (
+from distribution_utilities import (
     y_of_F_after_damage,
-    y_of_F_lagged_damage,
     segment_integral_with_cut,
     total_tax_top,
     total_tax_bottom,
     find_Fmax,
     find_Fmin,
     L_pareto,
-    L_pareto_derivative
-)
-from income_distribution_lagged import (
-    find_Fmin_lagged,
-    find_Fmax_lagged,
-    compute_damage_integral_lagged,
-)
-from parameters import evaluate_params_at_time
-from utility_integrals import (
+    L_pareto_derivative,
     crra_utility_interval,
     crra_utility_integral_with_damage,
     climate_damage_integral
 )
+from parameters import evaluate_params_at_time
 from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, MAX_ITERATIONS, N_QUAD, INVERSE_EPSILON
 
 
-def calculate_tendencies(state, params, previous_step_values, xi, wi, store_detailed_output=True):
+def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -114,8 +106,8 @@ def calculate_tendencies(state, params, previous_step_values, xi, wi, store_deta
     eta = params['eta']
     rho = params['rho']
     t = params['t']
-    A = params['A']
-    L = params['L']
+    A = params['A'] # total factor productivity
+    L = params['L'] # population
     sigma = params['sigma']
     theta1 = params['theta1']
     theta2 = params['theta2']
@@ -135,8 +127,27 @@ def calculate_tendencies(state, params, previous_step_values, xi, wi, store_deta
     income_redistribution = params['income_redistribution']
     income_dependent_redistribution_policy = params['income_dependent_redistribution_policy']
 
+    # set damage exponent to zero if no income-dependent damage
+    if not income_dependent_damage_distribution:
+        y_damage_distribution_exponent = 0.0
+
     #========================================================================================
-    # Calculate quantities that don't require iteration
+    # Simplified damage calculation using aggregate damage from previous timestep
+    # No iteration needed - uses temperature-based Omega_base with previous damage for budgeting
+
+    # Initialize variables
+    uniform_redistribution_amount = 0.0
+    uniform_tax_rate = 0.0
+    Fmin = 0.0
+    Fmax = 1.0
+
+    # Extract climate damage from previous timestep
+    Climate_Damage_yi_prev = previous_step_values.get('Climate_Damage_yi') # gross damage per increase in rank F
+    Climate_Damage_prev = np.sum(wi * Climate_Damage_yi_prev)
+    climate_damage_yi_prev = Climate_Damage_yi_prev / L # gross damage per capita per increase in rank F
+
+    #========================================================================================
+    # Main calculations
 
     # Eq 1.1: Gross production (Cobb-Douglas)
     if K > 0 and L > 0:
@@ -146,173 +157,150 @@ def calculate_tendencies(state, params, previous_step_values, xi, wi, store_deta
         Y_gross = 0.0
         y_gross = 0.0
 
+    # Calculate Omega using last time step's climate damage but this time step's gross production
+    # Error from using previous time step to calculate Omega an be made arbitrarily small by decreasing dt
+    Omega = Climate_Damage_prev / Y_gross if Y_gross > 0 else 0.0  # Base climate damage fraction from previous timestep
+
+    Y_damaged = Y_gross * (1.0 - Omega) # Gross production net of climate damage
+    y_damaged = y_gross * (1.0 - omega) # gross production per capita net of climate damage
+
     # Eq 2.2: Temperature change from cumulative emissions
     delta_T = k_climate * Ecum
 
     # Base damage from temperature (capped just below 1.0 to avoid division by zero)
-    Omega = min(psi1 * delta_T + psi2 * (delta_T ** 2), 1.0 - EPSILON)
+    # Be careful when used not to produce effective Omega values >= 1.0
+    Omega_base = psi1 * delta_T + psi2 * (delta_T ** 2)
 
-    # Target Omega: only iterate if we have income-dependent damage distribution
-    # AND income_dependent_aggregate_damage is False
-    if income_dependent_damage_distribution and not income_dependent_aggregate_damage:
-        Omega_target = Omega
-    else:
-        # No iteration needed: either damage is uniform, or we use the aggregate directly
-        Omega_target = None  # Signal that we won't iterate
-
-    # Initialize Omega using base damage as starting guess
-    Omega_base = Omega
-    # if income_dependent_damage_distribution and not income_dependent_aggregate_damage,
-    # we will be updating Omega_base to match aggregate damage
-    # start with a higher value to help convergence
-    if income_dependent_damage_distribution and not income_dependent_aggregate_damage:
-        Omega_base = Omega_target * (y_gross / y_net_reference)**y_damage_distribution_exponent
-
-    # Initialize Omega_base_prev (only actually used when income_dependent_damage_distribution
-    # is true and income_dependent_aggregate_damage is false, but initialize here to avoid
-    # UnboundLocalError in convergence checks)
-    Omega_base_prev = Omega_base
-
-    #========================================================================================
-    # Explicit lagged damage calculation (replaces iterative convergence loop)
-    # Uses damage from previous timestep to compute current income distribution explicitly
-
-    # Extract previous timestep values for lagged damage calculation
-    Omega_base_prev = previous_step_values['Omega_base']
-    Fmin_prev = previous_step_values['Fmin']
-    Fmax_prev = previous_step_values['Fmax']
-    y_gross_prev = previous_step_values['y_gross']
-    uniform_redistribution_prev = previous_step_values['uniform_redistribution_amount']
-    uniform_tax_rate_prev = previous_step_values['uniform_tax_rate']
-    gini_prev = previous_step_values['gini']
-    yi_prev = previous_step_values.get('yi', None)  # Income at quadrature points from previous timestep
-    Climate_Damage_prev = previous_step_values.get('Climate_Damage', 0.0)  # Total climate damage from previous timestep
-
-    # Initialize variables
-    uniform_redistribution_amount = 0.0
-    uniform_tax_rate = 0.0
-    Fmin = 0.0
-    Fmax = 1.0
-    n_damage_iterations = 1  # Lagged approach: single pass, no iteration
-
-    # Handle edge case: no economy
     if y_gross <= EPSILON:
+        # Economy has collapsed - set all downstream variables to zero or appropriate values
         redistribution_amount = 0.0
         abateCost_amount = 0.0
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
-        Omega = 0.0
-        yi = None
     else:
-        # Compute redistribution and abatement amounts using Omega_target (from temperature)
-        # For lagged approach, we use Omega_target directly without iteration
-        if income_dependent_damage_distribution and not income_dependent_aggregate_damage:
-            omega_for_budget = min(Omega_target, 1.0 - EPSILON)
-        else:
-            omega_for_budget = min(Omega, 1.0 - EPSILON)
-
-        available_for_redistribution_and_abatement = fract_gdp * y_gross * (1 - omega_for_budget)
+        # Economy exists - proceed with calculations
+        
+        available_for_redistribution_and_abatement = fract_gdp * y_gross * (1.0 - min(Omega,1.0))
 
         if income_redistribution:
             redistribution_amount = (1 - f) * available_for_redistribution_and_abatement
         else:
             redistribution_amount = 0.0
 
-        abateCost_amount = f * available_for_redistribution_and_abatement
+        abateCost_amount = f * available_for_redistribution_and_abatement # per capita
+        tax_amount = abateCost_amount + redistribution_amount # per capita
+        # tax amount can be less than amount available if redistribution is turned off.
 
-        # Find Fmin and Fmax using lagged damage
+        # Find uniform redistribution amount
+        if income_redistribution and income_dependent_redistribution_policy:
+            # No uniform distribution
+            uniform_redistribution_amount = 0.0
+        else:
+            # Uniform redistribution
+            uniform_redistribution_amount = redistribution_amount
+
+        # Find uniform tax amount
+        if income_dependent_tax_policy:
+            tax_amount = abateCost_amount + redistribution_amount
+        else:
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega))
+            Fmax = 1.0
+
+        #------------------------------------------------------
+        # Now we are going to do the income dependent part of the code
+        # To simplify we are going to shift the calculation to discrete intervals of population
+        # governed by the Gaussian Laegendre nodes and weights, xi and wi
+       
+        # Transform xi into F space. Nap [-1,1] to [0,1]
+        Fi = (xi + 1.0)/2.0 
+        Fi_edges = (xi_edges + 1.0)/2.0
+
+        lorenz_fractions_yi = L_pareto(Fi_edges[1:], gini) - L_pareto(Fi_edges[:-1],gini) # fraction of income in each bin
+        lorenz_ratio_yi = lorenz_fractions_yi/wi # ratio of mean income in each bin to aggregate mean income
+
+        y_damaged_yi = lorenz_ratio_yi * y_gross - climate_damage_yi_prev 
+        consumption_yi = np.zeros_like(xi)
+        utility_yi = np.zeros_like(xi)
+
+        # For income-dependent tax, find Fmax such that tax matches target
+        if income_dependent_tax_policy:
+            uniform_tax_rate = 0.0
+            # We want to find the value of Fmax such that if everyone above Fmax made
+            # the same amount of money as people at Fmax, that would generate the right amount of tax revenue.
+            # The piece of resources that would come from the Lorenz curve above Fmax is:
+            # lorenz_part = ygross *( (1 - L(Fmax)) - (1.0 - Fmax) * (d L/dF)@Fmax )
+            # damage_part = stepwise_interpolate(Fmax,climate_damage_yi_prev,Fi_edges)
+            # The challenge is to find Fmax such that:
+            # tax_amount = lorenz_part - damage_part 
+
+            Fmax = find_Fmax(
+                Fmin, y_gross * (1 - uniform_tax_rate),
+                uniform_redistribution_amount, climate_damage_amount_yi, gini,
+                xi, xi_edges, wi, target_tax=tax_amount,
+            )
+
+        else:
+            # Uniform tax
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega))
+            Fmax = 1.0
+
+        # Find Fmin and Fmax using current Omega_base
         # For income-dependent redistribution, find Fmin such that redistribution matches target
         if income_redistribution and income_dependent_redistribution_policy:
+            Fmin = invert_step_integral(Fi_edges, y_damaged_yi, yint)
             uniform_redistribution_amount = 0.0
-            Fmin = find_Fmin_lagged(
-                Fmax, y_gross, uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
-                xi, wi, target_subsidy=redistribution_amount,
+            Fmin =   find_Fmin(
+                y_gross * (1 - uniform_tax_rate), 
+                uniform_redistribution_amount, climate_damage_amount_yi, gini,
+                xi, xi_edges, wi, target_subsidy=redistribution_amount,
             )
         else:
             # Uniform redistribution
             uniform_redistribution_amount = redistribution_amount
             Fmin = 0.0
 
-        # For income-dependent tax, find Fmax such that tax matches target
-        if income_dependent_tax_policy:
-            tax_amount = abateCost_amount + redistribution_amount
-            uniform_tax_rate = 0.0
-            Fmax = find_Fmax_lagged(
-                Fmin, y_gross, uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
-                xi, wi, target_tax=tax_amount,
-            )
-        else:
-            # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - omega_for_budget))
-            Fmax = 1.0
 
-        # Compute aggregate damage and utility using lagged damage
+
+        # Compute consumption, aggregate utility for the Fmin and Fmax region, and at each of the Gauss-Legendre quadrature nodes
+        # Also calculate climate damage for next time step.
         # Divide calculation into three segments: [0, Fmin], [Fmin, Fmax], [Fmax, 1]
-        aggregate_damage_fraction = 0.0
-        aggregate_utility = 0.0
+        consumption_yi = np.zeros_like(xi)
+        climate_damage_yi = np.zeros_like(xi)
 
         # Segment 1: Low-income earners receiving income-dependent redistribution [0, Fmin]
         if Fmin > EPSILON:
-            min_y_net = y_of_F_lagged_damage(
-                Fmin,
-                Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
+            climate_damage_amount_at_F = stepwise_interpolate(Fmin, climate_damage_yi_prev, Fi_edges)
+            min_y_net = y_of_F_after_damage(
+                Fmin, Fmin, Fmax,
+                y_gross * (1 - uniform_tax_rate), 
+                uniform_redistribution_amount, climate_damage_amount_at_F,gini,
             )
             min_consumption = min_y_net * (1 - s)
-
-            # Damage for this segment (everyone has same income at Fmin)
-            # Use previous income to compute damage fraction
-            y_prev_at_Fmin = y_of_F_after_damage(
-                Fmin, Fmin_prev, Fmax_prev, y_gross_prev, Omega_base_prev,
-                y_damage_distribution_exponent, y_net_reference,
-                uniform_redistribution_prev, gini_prev,
-            )
-            if np.abs(y_damage_distribution_exponent) < EPSILON:
-                Omega_min = Omega_base_prev
-            else:
-                Omega_min = Omega_base_prev * (y_prev_at_Fmin / y_net_reference) ** y_damage_distribution_exponent
-
-            aggregate_damage_fraction += Fmin * Omega_min
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
+            climate_damage_min = min_y_net * omega_base * (min_y_net/y_net_reference)**-y_damage_distribution_exponent
+            climate_damage_min = np.clip(climate_damage_min, 0.0, min_y_net)
+            climate_damage_yi = climate_damage_yi + \
+                climate_damage_min * np.clip(np.minimum(Fi_edges[1:], Fmin) - Fi_edges[:-1], 0, Fwi) / Fwi
 
         # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
-        yi = None  # Income at quadrature points for next timestep
+        Climate_Damage_yi = None  # Climate damage at quadrature points for next timestep
         if Fmax - Fmin > EPSILON:
-            damage_mid = compute_damage_integral_lagged(
-                Fmin, Fmax,
-                Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
-                xi, wi,
-            )
-            aggregate_damage_fraction += damage_mid
-
             # Utility for middle segment - integrate over income distribution
-            # Map quadrature nodes to [Fmin, Fmax]
-            interval_width = Fmax - Fmin
-            F_nodes = Fmin + 0.5 * interval_width * (xi + 1.0)
-            y_vals = y_of_F_lagged_damage(
-                F_nodes,
-                Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
+
+            y_vals_Fi = y_of_F_after_damage(
+                Fi, Fmin, Fmax,
+                y_gross * (1 - uniform_tax_rate), 
+                uniform_redistribution_amount, climate_damage_yi_prev,
+                uniform_redistribution_amount, gini,
             )
 
-            # Store income values at quadrature points for next timestep
-            yi = y_vals.copy()
+            # Compute climate damage at quadrature points for next timestep
+            if np.abs(y_damage_distribution_exponent) < EPSILON:
+                # Uniform damage
+                Climate_Damage_yi = np.full_like(y_vals, Omega_base)
+            else:
+                # Income-dependent damage - use current income to compute damage for next timestep
+                Climate_Damage_yi = Omega_base * (y_vals / y_net_reference) ** y_damage_distribution_exponent
 
             consumption_vals = y_vals * (1 - s)
             if eta == 1:
@@ -323,49 +311,14 @@ def calculate_tendencies(state, params, previous_step_values, xi, wi, store_deta
 
         # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
         if 1.0 - Fmax > EPSILON:
-            max_y_net = y_of_F_lagged_damage(
-                Fmax,
-                Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), uniform_redistribution_amount, uniform_tax_rate, gini,
-                Omega_base_prev, y_damage_distribution_exponent, y_net_reference,
-                Fmin_prev, Fmax_prev, y_gross_prev,
-                uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
+            max_y_net = y_of_F_after_damage(
+                Fmax, Fmin, Fmax,
+                y_gross * (1 - uniform_tax_rate), Omega_base,
+                y_damage_distribution_exponent, y_net_reference,
+                uniform_redistribution_amount, gini,
             )
             max_consumption = max_y_net * (1 - s)
-
-            # Damage for this segment (everyone has same income at Fmax)
-            y_prev_at_Fmax = y_of_F_after_damage(
-                Fmax, Fmin_prev, Fmax_prev, y_gross_prev, Omega_base_prev,
-                y_damage_distribution_exponent, y_net_reference,
-                uniform_redistribution_prev, gini_prev,
-            )
-            if np.abs(y_damage_distribution_exponent) < EPSILON:
-                Omega_max = Omega_base_prev
-            else:
-                Omega_max = Omega_base_prev * (y_prev_at_Fmax / y_net_reference) ** y_damage_distribution_exponent
-
-            aggregate_damage_fraction += (1 - Fmax) * Omega_max
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
-
-        # Set Omega from aggregate damage (no iteration needed!)
-        Omega = min(aggregate_damage_fraction, 1.0 - EPSILON)
-
-        # Compute Omega_base for next timestep
-        # If income_dependent_aggregate_damage is False, we scale Omega_base to match Omega_target
-        # With lagged approach, Omega might not exactly equal Omega_target, but that's OK
-        # For next timestep, we compute Omega_base from current Omega
-        if income_dependent_damage_distribution and not income_dependent_aggregate_damage:
-            # Compute expected value of (y/y_ref)^alpha to scale Omega_base
-            # This gives us Omega_base such that E[Omega_base * (y/y_ref)^alpha] ≈ Omega_target at next timestep
-            # For now, use simple scaling based on aggregate damage
-            if Omega > EPSILON:
-                # Omega_base for next step = Omega_target * Omega_base_current / Omega_current
-                # But we want to use the target for next step, which is Omega (from temperature)
-                # Actually, for next step we want Omega_base such that aggregate gives Omega_target_next
-                # Simplest approach: scale current Omega_base by ratio
-                Omega_base = Omega_target * Omega_base_prev / Omega if Omega > EPSILON else Omega_target
-            else:
-                Omega_base = Omega_target
 
     #========================================================================================
     # Calculate downstream economic variables
@@ -489,18 +442,8 @@ def calculate_tendencies(state, params, previous_step_values, xi, wi, store_deta
 
     # Always return current state for use as previous_step_values in next time step
     results['current_income_dist'] = {
-        'y_mean': y_gross,
-        'y_net': y_net,
-        'gini': gini,
-        'Omega_base': Omega_base,
-        'Fmin': Fmin,
-        'Fmax': Fmax,
-        'uniform_redistribution_amount': uniform_redistribution_amount,
-        'uniform_tax_rate': uniform_tax_rate,
-        'y_gross': y_gross,
-        'y_net_reference': y_net_reference,
-        'yi': yi,  # Income at quadrature points for next timestep's lagged damage
         'Climate_Damage': Climate_Damage,  # Total climate damage for next timestep
+        'Climate_Damage_yi': Climate_Damage_yi,  # Climate damage at quadrature points (for analysis/debugging)
     }
 
     return results
@@ -555,6 +498,7 @@ def integrate_model(config, store_detailed_output=True):
 
     # Precompute Gauss-Legendre quadrature nodes and weights (used for all timesteps)
     xi, wi = roots_legendre(N_QUAD)
+    xi_edges = 2.0* np.concatenate(([0.0], np.cumsum(wi))) - 1.0  # length N_QUAD + 1
 
     # Calculate initial state
     A0 = config.time_functions['A'](t_start)
@@ -625,18 +569,8 @@ def integrate_model(config, store_detailed_output=True):
     Y_gross_initial_damage = Y_gross_initial * Omega_initial
 
     previous_step_values = {
-        'y_mean': y_gross_initial,
-        'gini': Gini_initial,
-        'Omega_base': Omega_base_initial,
-        'Fmin': 0.0,
-        'Fmax': 1.0,
-        'uniform_redistribution_amount': 0.0,
-        'uniform_tax_rate': 0.0,
-        'y_gross': y_gross_initial,
-        'y_net': y_gross_initial * (1.0 - Omega_initial),  # Approximate initial net income
-        'y_net_reference': config.scalar_params.y_net_reference,
-        'yi': None,  # Income at quadrature points (not available for first timestep)
         'Climate_Damage': Y_gross_initial_damage,  # Initial total climate damage
+        'Climate_Damage_yi': None,  # Climate damage at quadrature points (not available for first timestep)
     }
 
     # Initialize storage for variables
@@ -699,7 +633,7 @@ def integrate_model(config, store_detailed_output=True):
 
         # Calculate all variables and tendencies at current time
         # Pass previous_step_values to avoid circular dependency in damage calculations
-        outputs = calculate_tendencies(state, params, previous_step_values, xi, wi, store_detailed_output)
+        outputs = calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
