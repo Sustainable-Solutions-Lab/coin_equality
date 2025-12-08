@@ -220,6 +220,107 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_mean_before_damage, omega_base, y_damag
     return y_solution[0] if is_scalar else y_solution
 
 
+def y_of_F_lagged_damage(
+    F,
+    Fmin_current,
+    Fmax_current,
+    y_mean_before_damage_current,
+    uniform_redistribution_current,
+    uniform_tax_rate_current,
+    gini_current,
+    Omega_base_prev,
+    y_damage_distribution_exponent,
+    y_net_reference,
+    Fmin_prev,
+    Fmax_prev,
+    y_gross_prev,
+    uniform_redistribution_prev,
+    uniform_tax_rate_prev,
+    gini_prev,
+):
+    """
+    Compute y(F,t) using LAGGED climate damage from previous timestep.
+
+    Uses explicit formula (no iteration):
+        y(F,t) = A(t) - damage_lagged(F)
+
+    where:
+        A(t) = y_mean(t) * (1 - tax(t)) * dL/dF(F; gini(t)) + uniform_redistribution(t)
+        damage_lagged(F) = Omega_base(t-dt) * [y(F,t-dt) / y_ref]^alpha
+
+    This eliminates the need for iterative convergence since y(F,t) only appears
+    on the left side of the equation.
+
+    Parameters
+    ----------
+    F : float or array-like
+        Population rank(s) in [0,1] at current timestep
+    Fmin_current, Fmax_current : float
+        Income distribution boundaries at current timestep
+    y_mean_before_damage_current : float
+        Mean income before damage/tax at current timestep
+    uniform_redistribution_current : float
+        Per-capita uniform redistribution at current timestep
+    uniform_tax_rate_current : float
+        Uniform tax rate at current timestep
+    gini_current : float
+        Gini coefficient at current timestep
+    Omega_base_prev : float
+        Base damage parameter from previous timestep
+    y_damage_distribution_exponent : float
+        Exponent for income-dependent damage distribution
+    y_net_reference : float
+        Reference income for damage scaling
+    Fmin_prev, Fmax_prev : float
+        Income distribution boundaries from previous timestep
+    y_gross_prev : float
+        Gross mean income from previous timestep
+    uniform_redistribution_prev : float
+        Per-capita uniform redistribution from previous timestep
+    uniform_tax_rate_prev : float
+        Uniform tax rate from previous timestep
+    gini_prev : float
+        Gini coefficient from previous timestep
+
+    Returns
+    -------
+    float or ndarray
+        Income y(F) at current timestep using lagged damage
+    """
+    F = np.clip(np.asarray(F), Fmin_current, Fmax_current)
+    is_scalar = F.ndim == 0
+    if is_scalar:
+        F = F.reshape(1)
+
+    # Current base income (before damage)
+    a_current = (1.0 + 1.0 / gini_current) / 2.0
+    dLdF_current = (1.0 - 1.0 / a_current) * (1.0 - F) ** (-1.0 / a_current)
+    A_current = (y_mean_before_damage_current * (1.0 - uniform_tax_rate_current)
+                 * dLdF_current + uniform_redistribution_current)
+
+    # Reconstruct previous income at same F rank for damage calculation
+    # Clip F to previous boundaries to handle boundary changes
+    F_prev_clipped = np.clip(F, Fmin_prev, Fmax_prev)
+
+    a_prev = (1.0 + 1.0 / gini_prev) / 2.0
+    dLdF_prev = (1.0 - 1.0 / a_prev) * (1.0 - F_prev_clipped) ** (-1.0 / a_prev)
+    y_prev = (y_gross_prev * (1.0 - uniform_tax_rate_prev) * dLdF_prev
+              + uniform_redistribution_prev)
+
+    # Compute lagged damage
+    if np.abs(y_damage_distribution_exponent) < EPSILON:
+        # Uniform damage case
+        damage_lagged = Omega_base_prev
+    else:
+        # Income-dependent damage
+        damage_lagged = Omega_base_prev * (y_prev / y_net_reference)**y_damage_distribution_exponent
+
+    # Explicit solution - no iteration needed!
+    result = A_current - damage_lagged
+
+    return result[0] if is_scalar else result
+
+
 def segment_integral_with_cut(
     Flo,
     Fhi,
