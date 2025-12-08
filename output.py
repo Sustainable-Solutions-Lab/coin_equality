@@ -44,7 +44,7 @@ VARIABLE_METADATA = {
     'Consumption': {'description': 'Total Consumption', 'units': '$/yr', 'group': 'economic'},
     'Savings': {'description': 'Gross Investment', 'units': '$/yr', 'group': 'economic'},
     's': {'description': 'Savings Rate', 'units': '', 'group': 'policy'},
-    'Gini_background': {'description': 'Background Gini Index', 'units': '', 'group': 'inequality'},
+    'gini': {'description': 'Background Gini Index', 'units': '', 'group': 'inequality'},
     'Gini': {'description': 'Gini Index', 'units': '', 'group': 'inequality'}
 }
 
@@ -327,7 +327,7 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         's',  # Savings rate
         # State variables
         'K',  # Capital stock
-        'Gini_background',  # Background Gini index
+        'gini',  # Background Gini index
         'Gini',  # Gini index
         'Ecum',  # Cumulative emissions
         # Related to Ecum
@@ -385,7 +385,7 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         'dK_dt': ('Net capital accumulation', '$/yr'),
         'y_net': ('Per-capita net income', '$/person/yr'),
         'Gini': ('Gini index', 'dimensionless'),
-        'Gini_background': ('Background Gini index', 'dimensionless'),
+        'gini': ('Background Gini index', 'dimensionless'),
         'redistribution': ('Per-capita redistribution amount', '$/person/yr'),
         'Redistribution_amount': ('Total redistribution amount', '$/yr'),
         'U': ('Mean utility per capita', 'dimensionless'),

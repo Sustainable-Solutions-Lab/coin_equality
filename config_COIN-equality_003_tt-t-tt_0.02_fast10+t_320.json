@@ -83,7 +83,7 @@
             "fract_1": 0.310452,
             "_fract_1": "2-exponential fit to sigma in Barrage & Nordhaus 2023"
         },
-        "Gini_background": {
+        "gini": {
             "_description": "Background Gini index (restoring attractor for Gini dynamics), assuming t = 0 is year 2020",
             "type": "exponential_growth",
             "exponential_scaling": 0.19517,

@@ -42,7 +42,7 @@ def main():
     print(f'  rho = {config.scalar_params.rho}')
     print(f'  fract_gdp = {config.scalar_params.fract_gdp}')
     print(f'\nTime-Dependent Parameters (at t=0):')
-    print(f'  Gini_background(0) = {config.time_functions["Gini_background"](0.0)}')
+    print(f'  gini(0) = {config.time_functions["gini"](0.0)}')
     print(f'  s(0) = {config.time_functions["s"](0.0)}')
 
     # Run integration

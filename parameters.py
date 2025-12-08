@@ -637,7 +637,7 @@ def evaluate_params_at_time(t, config):
         Dictionary containing all parameters evaluated at time t,
         with keys matching those expected by calculate_tendencies():
         'alpha', 'delta', 'psi1', 'psi2', 'y_damage_distribution_exponent', 'y_net_reference', 'k_climate',
-        'eta', 'rho', 'Gini_background', 'Gini_fract', 'Gini_restore', 'fract_gdp', 'theta2', 'mu_max',
+        'eta', 'rho', 'gini', 'Gini_fract', 'Gini_restore', 'fract_gdp', 'theta2', 'mu_max',
         'A', 'L', 'sigma', 'theta1', 'f', 's'
 
     Notes
@@ -677,7 +677,7 @@ def evaluate_params_at_time(t, config):
         'L': tf['L'](t),
         'sigma': tf['sigma'](t),
         'theta1': tf['theta1'](t),
-        'Gini_background': tf['Gini_background'](t),
+        'gini': tf['gini'](t),
     }
 
     # Dual control function evaluation returns (f, s)

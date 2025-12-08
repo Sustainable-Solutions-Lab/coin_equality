@@ -61,7 +61,7 @@
       "growth_rate": -0.02,
       "_growth_rate": "Declining at 2% per year (technological progress)"
     },
-    "Gini_background": {
+    "gini": {
       "_description": "Background Gini index (restoring attractor for Gini dynamics)",
       "type": "constant",
       "value": 0.67

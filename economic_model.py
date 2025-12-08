@@ -32,7 +32,7 @@ from utility_integrals import (
 from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, MAX_ITERATIONS, N_QUAD, INVERSE_EPSILON
 
 
-def calculate_tendencies(state, params, previous_step_values, store_detailed_output=True):
+def calculate_tendencies(state, params, previous_step_values, xi, wi, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -59,9 +59,9 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
         - 'theta1': Abatement cost coefficient (current, $ tCO2^-1)
         - 'theta2': Abatement cost exponent
         - 'mu_max': Maximum allowed abatement fraction (cap on μ)
-        - 'Gini_background': Background Gini index (current, from time function)
+        - 'gini': Background Gini index (current, from time function)
         - 'Gini_fract': Fraction of Gini change as instantaneous step
-        - 'Gini_restore': Rate of restoration to Gini_background (yr^-1)
+        - 'Gini_restore': Rate of restoration to gini (yr^-1)
         - 'fract_gdp': Fraction of GDP available for redistribution and abatement
         - 'f': Fraction allocated to abatement vs redistribution
     previous_step_values : dict
@@ -121,7 +121,7 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
     theta2 = params['theta2']
     mu_max = params['mu_max']
     fract_gdp = params['fract_gdp']
-    Gini_background = params['Gini_background']
+    gini = params['gini']
     f = params['f']
     y_damage_distribution_exponent = params['y_damage_distribution_exponent']
     y_net_reference = params['y_net_reference']
@@ -173,15 +173,9 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
     # UnboundLocalError in convergence checks)
     Omega_base_prev = Omega_base
 
-    # Current Gini coefficient from background
-    gini = Gini_background
-
     #========================================================================================
     # Explicit lagged damage calculation (replaces iterative convergence loop)
     # Uses damage from previous timestep to compute current income distribution explicitly
-
-    # Precompute Gauss-Legendre quadrature nodes and weights for numerical integration
-    xi, wi = roots_legendre(N_QUAD)
 
     # Extract previous timestep values for lagged damage calculation
     Omega_base_prev = previous_step_values['Omega_base']
@@ -191,6 +185,8 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
     uniform_redistribution_prev = previous_step_values['uniform_redistribution_amount']
     uniform_tax_rate_prev = previous_step_values['uniform_tax_rate']
     gini_prev = previous_step_values['gini']
+    yi_prev = previous_step_values.get('yi', None)  # Income at quadrature points from previous timestep
+    Climate_Damage_prev = previous_step_values.get('Climate_Damage', 0.0)  # Total climate damage from previous timestep
 
     # Initialize variables
     uniform_redistribution_amount = 0.0
@@ -206,6 +202,7 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
         Omega = 0.0
+        yi = None
     else:
         # Compute redistribution and abatement amounts using Omega_target (from temperature)
         # For lagged approach, we use Omega_target directly without iteration
@@ -288,6 +285,7 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
 
         # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
+        yi = None  # Income at quadrature points for next timestep
         if Fmax - Fmin > EPSILON:
             damage_mid = compute_damage_integral_lagged(
                 Fmin, Fmax,
@@ -312,6 +310,10 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
                 Fmin_prev, Fmax_prev, y_gross_prev,
                 uniform_redistribution_prev, uniform_tax_rate_prev, gini_prev,
             )
+
+            # Store income values at quadrature points for next timestep
+            yi = y_vals.copy()
+
             consumption_vals = y_vals * (1 - s)
             if eta == 1:
                 utility_vals = np.log(consumption_vals)
@@ -446,7 +448,7 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
             'dK_dt': dK_dt,
             'dEcum_dt': E,
             'Gini': gini,  # Current Gini for plotting
-            'Gini_background': Gini_background,  # Background Gini for reference
+            'gini': gini,  # Background Gini for reference
             'Y_gross': Y_gross,
             'delta_T': delta_T,
             'Omega': Omega,
@@ -497,6 +499,8 @@ def calculate_tendencies(state, params, previous_step_values, store_detailed_out
         'uniform_tax_rate': uniform_tax_rate,
         'y_gross': y_gross,
         'y_net_reference': y_net_reference,
+        'yi': yi,  # Income at quadrature points for next timestep's lagged damage
+        'Climate_Damage': Climate_Damage,  # Total climate damage for next timestep
     }
 
     return results
@@ -526,7 +530,7 @@ def integrate_model(config, store_detailed_output=True):
         - 'K': array of capital stock values
         - 'Ecum': array of cumulative emissions values
         - 'Gini': array of Gini index values (from background)
-        - 'Gini_background': array of background Gini index values
+        - 'gini': array of background Gini index values
         - 'A', 'sigma', 'theta1', 'f': time-dependent inputs
         - All derived variables: Y_gross, delta_T, Omega, Y_damaged, Y_net,
           redistribution, mu, Lambda, AbateCost, marginal_abatement_cost, y_net, E
@@ -549,6 +553,9 @@ def integrate_model(config, store_detailed_output=True):
     t_array = np.arange(t_start, t_end + dt, dt)
     n_steps = len(t_array)
 
+    # Precompute Gauss-Legendre quadrature nodes and weights (used for all timesteps)
+    xi, wi = roots_legendre(N_QUAD)
+
     # Calculate initial state
     A0 = config.time_functions['A'](t_start)
     L0 = config.time_functions['L'](t_start)
@@ -560,7 +567,7 @@ def integrate_model(config, store_detailed_output=True):
     Ecum_initial = config.scalar_params.Ecum_initial
     params = evaluate_params_at_time(t_start, config)
 
-    Gini = config.time_functions['Gini_background'](t_start)
+    Gini = config.time_functions['gini'](t_start)
     k_climate = params['k_climate']
     delta_T = k_climate * Ecum_initial
 
@@ -605,7 +612,7 @@ def integrate_model(config, store_detailed_output=True):
     alpha = config.scalar_params.alpha
     Y_gross_initial = A0 * (K0 ** alpha) * (L0 ** (1 - alpha))
     y_gross_initial = Y_gross_initial / L0 if L0 > 0 else 0.0
-    Gini_initial = config.time_functions['Gini_background'](t_start)
+    Gini_initial = config.time_functions['gini'](t_start)
 
     # Compute initial damage from cumulative emissions
     delta_T_initial = k_climate * config.scalar_params.Ecum_initial
@@ -613,6 +620,9 @@ def integrate_model(config, store_detailed_output=True):
     psi2 = params['psi2']
     Omega_initial = psi1 * delta_T_initial + psi2 * delta_T_initial**2
     Omega_base_initial = Omega_initial  # No income-dependent adjustment initially
+
+    # Compute initial climate damage
+    Y_gross_initial_damage = Y_gross_initial * Omega_initial
 
     previous_step_values = {
         'y_mean': y_gross_initial,
@@ -625,6 +635,8 @@ def integrate_model(config, store_detailed_output=True):
         'y_gross': y_gross_initial,
         'y_net': y_gross_initial * (1.0 - Omega_initial),  # Approximate initial net income
         'y_net_reference': config.scalar_params.y_net_reference,
+        'yi': None,  # Income at quadrature points (not available for first timestep)
+        'Climate_Damage': Y_gross_initial_damage,  # Initial total climate damage
     }
 
     # Initialize storage for variables
@@ -642,7 +654,7 @@ def integrate_model(config, store_detailed_output=True):
             'Omega': np.zeros(n_steps),
             'Omega_base': np.zeros(n_steps),
             'Gini': np.zeros(n_steps),  # Total Gini (background + perturbation)
-            'Gini_background': np.zeros(n_steps),  # Background Gini
+            'gini': np.zeros(n_steps),  # Background Gini
             'Y_damaged': np.zeros(n_steps),
             'Y_net': np.zeros(n_steps),
             'y_damaged': np.zeros(n_steps),
@@ -687,7 +699,7 @@ def integrate_model(config, store_detailed_output=True):
 
         # Calculate all variables and tendencies at current time
         # Pass previous_step_values to avoid circular dependency in damage calculations
-        outputs = calculate_tendencies(state, params, previous_step_values, store_detailed_output)
+        outputs = calculate_tendencies(state, params, previous_step_values, xi, wi, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -710,7 +722,7 @@ def integrate_model(config, store_detailed_output=True):
             results['Omega'][i] = outputs['Omega']
             results['Omega_base'][i] = outputs['Omega_base']
             results['Gini'][i] = outputs['Gini']  # Total Gini
-            results['Gini_background'][i] = outputs['Gini_background']  # Background Gini
+            results['gini'][i] = outputs['gini']  # Background Gini
             results['Y_damaged'][i] = outputs['Y_damaged']
             results['Y_net'][i] = outputs['Y_net']
             results['y_damaged'][i] = outputs['y_damaged']

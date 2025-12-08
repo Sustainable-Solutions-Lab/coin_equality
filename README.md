@@ -378,14 +378,14 @@ For more sophisticated treatment of `f_gdp >= 1` with non-Pareto income distribu
 
 #### 5. Gini Index Dynamics and Persistence
 
-The Gini index consists of two components: an **exogenous background** `Gini_background(t)` and an **endogenous perturbation** `delta_Gini(t)` that evolves over time.
+The Gini index consists of two components: an **exogenous background** `gini(t)` and an **endogenous perturbation** `delta_Gini(t)` that evolves over time.
 
 **Decomposition:**
 ```
-Gini(t) = Gini_background(t) + delta_Gini(t)
+Gini(t) = gini(t) + delta_Gini(t)
 ```
 where:
-- `Gini_background(t)`: Exogenously specified time function (e.g., demographic trends, structural inequality)
+- `gini(t)`: Exogenously specified time function (e.g., demographic trends, structural inequality)
 - `delta_Gini(t)`: Endogenous state variable representing policy-driven perturbations from background
 
 **State Variable:**
@@ -402,7 +402,7 @@ The perturbation evolves through two mechanisms:
 delta_Gini_step_change = Gini_fract · (G_eff - Gini)
 ```
 where:
-- `Gini = Gini_background(t) + delta_Gini` is the current total Gini
+- `Gini = gini(t) + delta_Gini` is the current total Gini
 - `G_eff` is the effective Gini from current policy (redistribution/abatement allocation)
 - `Gini_fract` is the fraction of the change applied as an immediate step (0 ≤ Gini_fract ≤ 1)
 - `Gini_fract = 0`: no immediate effect (fully persistent system)
@@ -427,7 +427,7 @@ delta_Gini(t+dt) = delta_Gini(t) + dt · d(delta_Gini)/dt + delta_Gini_step_chan
 **Physical Interpretation:**
 
 This formulation cleanly separates exogenous and endogenous inequality dynamics:
-- **Exogenous background** (`Gini_background(t)`): Captures structural inequality trends (demographics, technology, institutions) specified externally
+- **Exogenous background** (`gini(t)`): Captures structural inequality trends (demographics, technology, institutions) specified externally
 - **Endogenous perturbation** (`delta_Gini`): Captures policy-driven deviations from background that restore to zero
 - **Policy pressure** (via `delta_Gini_step_change`): Redistribution policies create perturbations from background
 - **Structural restoration** (via `d(delta_Gini)/dt`): Absent continued intervention, perturbations decay back to zero
@@ -505,7 +505,7 @@ These functions are evaluated at each time step:
 | `L(t)` | Population | people | `L` |
 | `σ(t)` | Carbon intensity of GDP | tCO₂ $⁻¹ | `sigma` |
 | `θ₁(t)` | Marginal abatement cost as μ→1 | $ tCO₂⁻¹ | `theta1` |
-| `Gini_background(t)` | Background Gini index (exogenous inequality baseline) | - | `Gini_background` |
+| `gini(t)` | Background Gini index (exogenous inequality baseline) | - | `gini` |
 
 Each function is specified by `type` and type-specific parameters (e.g., `exponential_scaling`, `growth_rate`). Six function types are available: `constant`, `exponential_growth`, `logistic_growth`, `piecewise_linear`, `double_exponential_growth` (Barrage & Nordhaus 2023), and `gompertz_growth` (Barrage & Nordhaus 2023). See the Configuration section below for detailed specifications.
 
@@ -735,7 +735,7 @@ Initial conditions are **computed automatically**:
 
 - **`Ecum(0) = Ecum_initial`**: Initial cumulative emissions from configuration (defaults to 0.0 if not specified)
 - **`delta_Gini(0) = 0.0`**: Initial perturbation from background Gini (system starts at background level)
-- **`Gini(0) = Gini_background(0)`**: Total initial Gini equals the background value
+- **`Gini(0) = gini(0)`**: Total initial Gini equals the background value
 - **`K(0)`**: Initial capital stock accounting for climate damage and abatement costs
 
 **Initial Capital Stock Calculation:**
@@ -782,7 +782,7 @@ The iteration count is printed during model execution for debugging purposes.
 
 See `config_baseline.json` for a complete example. To create new scenarios, copy and modify this file.
 
-**Note**: `config_DICE_000.json` provides a configuration for simulations close to the parameters and setup presented in Barrage & Nordhaus (2023), including Gompertz population growth, double exponential functions for carbon intensity and abatement costs, and settings that replicate DICE2023 behavior (income_redistribution = false for pure abatement mode, Gini_background = 0.0 for no inequality).
+**Note**: `config_DICE_000.json` provides a configuration for simulations close to the parameters and setup presented in Barrage & Nordhaus (2023), including Gompertz population growth, double exponential functions for carbon intensity and abatement costs, and settings that replicate DICE2023 behavior (income_redistribution = false for pure abatement mode, gini = 0.0 for no inequality).
 
 **Example: Population with Gompertz growth**
 ```json
@@ -1376,7 +1376,7 @@ Compared to initial implementation, these optimizations provide ~200x faster int
 The results dictionary contains arrays for:
 - **Time**: `t`
 - **State variables**: `K`, `Ecum`, `delta_Gini`
-- **Time-dependent inputs**: `A`, `L`, `sigma`, `theta1`, `f`, `s`, `Gini_background`
+- **Time-dependent inputs**: `A`, `L`, `sigma`, `theta1`, `f`, `s`, `gini`
 - **Economic variables**: `Y_gross`, `Y_damaged`, `Y_net`, `y`, `y_net`, `y_damaged`
 - **Climate variables**: `delta_T`, `Omega`, `Omega_base`, `E`, `Climate_Damage`, `climate_damage`
 - **Abatement variables**: `mu`, `Lambda`, `AbateCost`, `marginal_abatement_cost`
