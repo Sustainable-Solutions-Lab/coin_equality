@@ -133,6 +133,9 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
     if not income_dependent_damage_distribution:
         y_damage_distribution_exponent = 0.0
 
+    # Transform quadrature weights to F space [0,1] (wi is for xi space [-1,1])
+    Fwi = wi / 2.0
+
     #========================================================================================
     # Simplified damage calculation using aggregate damage from previous timestep
     # No iteration needed - uses temperature-based Omega_base with previous damage for budgeting
@@ -145,7 +148,7 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
 
     # Extract climate damage from previous timestep
     Climate_Damage_yi_prev = previous_step_values.get('Climate_Damage_yi') # gross damage per increase in rank F
-    Climate_Damage_prev = np.sum(wi * Climate_Damage_yi_prev)
+    Climate_Damage_prev = np.sum(Fwi * Climate_Damage_yi_prev)
     climate_damage_yi_prev = Climate_Damage_yi_prev / L # gross damage per capita per increase in rank F
 
     #========================================================================================
@@ -213,16 +216,9 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
         # To simplify we are going to shift the calculation to discrete intervals of population
         # governed by the Gaussian Laegendre nodes and weights, xi and wi
        
-        # Transform xi into F space. Nap [-1,1] to [0,1]
-        Fi = (xi + 1.0)/2.0 
+        # Transform xi into F space. Map [-1,1] to [0,1]
+        Fi = (xi + 1.0)/2.0
         Fi_edges = (xi_edges + 1.0)/2.0
-
-        lorenz_fractions_yi = L_pareto(Fi_edges[1:], gini) - L_pareto(Fi_edges[:-1],gini) # fraction of income in each bin
-        lorenz_ratio_yi = lorenz_fractions_yi/wi # ratio of mean income in each bin to aggregate mean income
-
-        y_damaged_yi = lorenz_ratio_yi * y_gross - climate_damage_yi_prev 
-        consumption_yi = np.zeros_like(xi)
-        utility_yi = np.zeros_like(xi)
 
         # For income-dependent tax, find Fmax such that tax matches target
         if income_dependent_tax_policy:
@@ -257,17 +253,34 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
             uniform_redistribution_amount = redistribution_amount
             Fmin = 0.0
 
-
-
         # Compute consumption, aggregate utility for the Fmin and Fmax region, and at each of the Gauss-Legendre quadrature nodes
         # Also calculate climate damage for next time step.
         # Divide calculation into three segments: [0, Fmin], [Fmin, Fmax], [Fmax, 1]
+        lorenz_fractions_yi = L_pareto(Fi_edges[1:], gini) - L_pareto(Fi_edges[:-1],gini) # fraction of income in each bin
+        lorenz_ratio_yi = lorenz_fractions_yi/Fwi # ratio of mean income in each bin to aggregate mean income
+
+        y_damaged_yi = lorenz_ratio_yi * y_gross - climate_damage_yi_prev 
+        y_net_yi = np.zeros_like(xi)
+        consumption_yi = np.zeros_like(xi)
+        utility_yi = np.zeros_like(xi)
         consumption_yi = np.zeros_like(xi)
         climate_damage_yi = np.zeros_like(xi)
 
         # Segment 1: Low-income earners receiving income-dependent redistribution [0, Fmin]
         if Fmin > EPSILON:
-            climate_damage_amount_at_F = stepwise_interpolate(Fmin, climate_damage_yi_prev, Fi_edges)
+            climate_damage_amount_at_Fmin = stepwise_interpolate(Fmin, climate_damage_yi_prev, Fi_edges)
+            y_damaged_yi_min = y_gross * L_pareto_derivative(Fmin, gini) - climate_damage_amount_at_Fmin
+
+            # Set y_net_yi for bins below Fmin
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i+1] <= Fmin:
+                    # Bin completely below Fmin
+                    y_net_yi[i] = y_damaged_yi_min
+                elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
+                    # Bin containing Fmin - weight by fraction below Fmin
+                    fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
+                    y_net_yi[i] = y_damaged_yi_min * fraction_below
+
             min_y_net = y_of_F_after_damage(
                 Fmin, Fmin, Fmax,
                 y_gross * (1 - uniform_tax_rate), 
@@ -280,7 +293,18 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
             climate_damage_yi = climate_damage_yi + \
                 climate_damage_min * np.clip(np.minimum(Fi_edges[1:], Fmin) - Fi_edges[:-1], 0, Fwi) / Fwi
 
-        # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
+        # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
+        if 1.0 - Fmax > EPSILON:
+            max_y_net = y_of_F_after_damage(
+                Fmax, Fmin, Fmax,
+                y_gross * (1 - uniform_tax_rate), Omega_base,
+                y_damage_distribution_exponent, y_net_reference,
+                uniform_redistribution_amount, gini,
+            )
+            max_consumption = max_y_net * (1 - s)
+            aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
+
+                # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
         Climate_Damage_yi = None  # Climate damage at quadrature points for next timestep
         if Fmax - Fmin > EPSILON:
             # Utility for middle segment - integrate over income distribution
@@ -305,18 +329,9 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
                 utility_vals = np.log(consumption_vals)
             else:
                 utility_vals = (consumption_vals ** (1 - eta)) / (1 - eta)
-            aggregate_utility += 0.5 * interval_width * np.sum(wi * utility_vals)
+            # Gauss-Legendre quadrature over [Fmin, Fmax]: (Fmax-Fmin)/2 maps from [-1,1] to [Fmin,Fmax]
+            aggregate_utility += (Fmax - Fmin) / 2.0 * np.sum(wi * utility_vals)
 
-        # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
-        if 1.0 - Fmax > EPSILON:
-            max_y_net = y_of_F_after_damage(
-                Fmax, Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), Omega_base,
-                y_damage_distribution_exponent, y_net_reference,
-                uniform_redistribution_amount, gini,
-            )
-            max_consumption = max_y_net * (1 - s)
-            aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
 
     #========================================================================================
     # Calculate downstream economic variables
