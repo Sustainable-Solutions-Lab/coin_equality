@@ -21,7 +21,7 @@ from parameters import evaluate_params_at_time
 from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, N_QUAD
 
 
-def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi, store_detailed_output=True):
+def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, wi, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -53,11 +53,11 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
         - 'Gini_restore': Rate of restoration to gini (yr^-1)
         - 'fract_gdp': Fraction of GDP available for redistribution and abatement
         - 'f': Fraction allocated to abatement vs redistribution
-    Climate_damage_yi_prev : np.ndarray
-        Total climate damage at quadrature points from previous timestep (length N_QUAD).
-        Damage in $ per unit rank F (not per capita). Converted to per-capita inside
-        function by dividing by current population L. Used to compute current income
-        distribution with lagged damage to avoid circular dependency.
+    climate_damage_yi_L_prev : np.ndarray
+        Total climate damage (in dollars) at quadrature points from previous timestep (length N_QUAD).
+        Units: $ at each rank F. Divided by current L to get per-capita damage.
+        Money-conserving: total damage preserved despite population changes.
+        Used to compute current income distribution with lagged damage to avoid circular dependency.
     xi : np.ndarray
         Gauss-Legendre quadrature nodes on [-1, 1] (length N_QUAD)
     xi_edges : np.ndarray
@@ -147,9 +147,11 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
     Fmin = 0.0
     Fmax = 1.0
 
-    # Use climate damage from previous timestep (total $ per unit F, passed as parameter)
-    Climate_damage_prev = np.sum(Fwi * Climate_damage_yi_prev)
-    climate_damage_yi_prev = Climate_damage_yi_prev / L # Convert to per capita
+    # Use climate damage from previous timestep (per-capita $/person, passed as parameter)
+    # Integrate over F-space to get average per-capita damage, then multiply by current L for total
+    # conserve money despite changing population in lagged damage calculation
+    Climate_damage_prev = np.sum(Fwi * climate_damage_yi_L_prev)  # Total damage ($)
+    climate_damage_yi_prev = climate_damage_yi_L_prev / L  # Already per-capita ($/person)
 
     #========================================================================================
     # Main calculations
@@ -201,6 +203,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
         E = 0.0
         dK_dt = -delta * K
         climate_damage_yi = np.zeros(N_QUAD)
+        climate_damage_yi_L = np.zeros(N_QUAD)
     else:
         # Economy exists - proceed with calculations
         
@@ -345,8 +348,16 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
             climate_damage_min = min_y_net * Omega_base * (min_y_net/y_net_reference)**y_damage_distribution_exponent
             climate_damage_min = np.clip(climate_damage_min, 0.0, min_y_net)
-            climate_damage_yi = climate_damage_yi + \
-                climate_damage_min * np.clip(np.minimum(Fi_edges[1:], Fmin) - Fi_edges[:-1], 0, Fwi) / Fwi
+
+            # Set climate_damage_yi for bins below Fmin (same approach as y_net_yi)
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i+1] <= Fmin:
+                    # Bin completely below Fmin
+                    climate_damage_yi[i] = climate_damage_min
+                elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
+                    # Bin containing Fmin - weight by fraction below Fmin
+                    fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
+                    climate_damage_yi[i] = climate_damage_min * fraction_below
 
         # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
         if 1.0 - Fmax > EPSILON:
@@ -372,8 +383,16 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
             climate_damage_max = max_y_net * Omega_base * (max_y_net/y_net_reference)**y_damage_distribution_exponent
             climate_damage_max = np.clip(climate_damage_max, 0.0, max_y_net)
-            climate_damage_yi = climate_damage_yi + \
-                climate_damage_max * np.clip(Fi_edges[1:] - np.maximum(Fi_edges[:-1], Fmax), 0, Fwi) / Fwi
+
+            # Set climate_damage_yi for bins above Fmax (same approach as y_net_yi)
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i] >= Fmax:
+                    # Bin completely above Fmax
+                    climate_damage_yi[i] = climate_damage_max
+                elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
+                    # Bin containing Fmax - weight by fraction above Fmax
+                    fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
+                    climate_damage_yi[i] = climate_damage_max * fraction_above
 
         # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
         if Fmax - Fmin > EPSILON:
@@ -429,6 +448,9 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
             # Adjust climate damage to match Omega_base
             total_climate_damage = np.sum(Fwi * climate_damage_yi)
             climate_damage_yi = climate_damage_yi * (Omega_base * y_gross) / total_climate_damage
+
+        climate_damage_yi_L = climate_damage_yi * L  # total climate damage ($) at each F bin
+
 
     #========================================================================================
 
@@ -493,7 +515,8 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi
     })
 
     # Always return climate damage distribution for use in next time step
-    results['Climate_damage_yi'] = climate_damage_yi * L  # Convert back to total ($ per unit F)
+    results['climate_damage_yi'] = climate_damage_yi_L  # Store total climate damage ($/population) for next timestep
+
 
     return results
 
@@ -550,7 +573,7 @@ def integrate_model(config, store_detailed_output=True):
     xi_edges = 2.0* np.concatenate(([0.0], np.cumsum(wi))) - 1.0  # length N_QUAD + 1
 
     # Initialize climate damage from previous timestep to zeros for first timestep
-    Climate_damage_yi_prev = np.zeros(N_QUAD)
+    climate_damage_yi_L_prev = np.zeros(N_QUAD)
 
     # Calculate initial state
     A0 = config.time_functions['A'](t_start)
@@ -658,8 +681,8 @@ def integrate_model(config, store_detailed_output=True):
         params = evaluate_params_at_time(t, config)
 
         # Calculate all variables and tendencies at current time
-        # Pass Climate_damage_yi_prev to use lagged damage (avoids circular dependency)
-        outputs = calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi, store_detailed_output)
+        # Pass climate_damage_yi_L_prev to use lagged damage (avoids circular dependency)
+        outputs = calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, wi, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -716,6 +739,6 @@ def integrate_model(config, store_detailed_output=True):
             state['Ecum'] = max(0.0, state['Ecum'] + dt * outputs['dEcum_dt'])
 
             # Update climate damage for next time step (lagged damage approach)
-            Climate_damage_yi_prev = outputs['Climate_damage_yi']
+            climate_damage_yi_L_prev = outputs['climate_damage_yi']
 
     return results
