@@ -578,8 +578,8 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
     _timing_stats['total_time'] += t_end - t_start
     _timing_stats['finalize_time'] += t_end - t_setup
 
-    # Print timing stats every 100000 calls
-    if _timing_stats['call_count'] % 100000 == 0:
+    # Print timing stats every 1000000 calls
+    if _timing_stats['call_count'] % 1000000 == 0:
         print_timing_stats()
 
     return results
@@ -790,7 +790,7 @@ def integrate_model(config, store_detailed_output=True):
             Fmax_prev = outputs.get('Fmax')
             Fmin_prev = outputs.get('Fmin')
 
-    # Print final timing statistics
-    print_timing_stats()
+    # Print final timing statistics only when called directly (not during optimization)
+    # print_timing_stats()
 
     return results

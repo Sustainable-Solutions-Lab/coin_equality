@@ -202,6 +202,12 @@ def find_Fmax_analytical(
     float
         Fmax value such that progressive taxation yields target_tax.
     """
+    # Pre-compute cumulative damage integrals at bin edges for fast lookup
+    # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
+    bin_widths = np.diff(Fi_edges)
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_yi * bin_widths)))
+    total_damage_integral = damage_cumulative[-1]
+
     def tax_revenue_minus_target(Fmax):
         # Lorenz contribution from Pareto distribution
         lorenz_part = y_gross * (
@@ -209,9 +215,27 @@ def find_Fmax_analytical(
             (1.0 - Fmax) * L_pareto_derivative(Fmax, gini)
         )
 
-        # Damage contribution using stepwise functions
-        damage_integral = stepwise_integrate(Fmax, 1.0, damage_yi, Fi_edges)
-        damage_at_Fmax = stepwise_interpolate(Fmax, damage_yi, Fi_edges)
+        # Fast damage calculation using pre-computed cumulative integrals
+        # Find which bin Fmax is in
+        bin_idx = np.searchsorted(Fi_edges, Fmax, side='right') - 1
+        bin_idx = np.clip(bin_idx, 0, len(damage_yi) - 1)
+
+        # Damage at Fmax is constant within bin (stepwise function)
+        damage_at_Fmax = damage_yi[bin_idx]
+
+        # Integral from Fmax to 1.0 = total - integral from 0 to Fmax
+        if Fmax <= Fi_edges[0]:
+            damage_integral_0_to_Fmax = 0.0
+        elif Fmax >= Fi_edges[-1]:
+            damage_integral_0_to_Fmax = total_damage_integral
+        else:
+            # Cumulative up to start of bin containing Fmax
+            damage_integral_0_to_Fmax = damage_cumulative[bin_idx]
+            # Add partial contribution from within the bin
+            partial_width = Fmax - Fi_edges[bin_idx]
+            damage_integral_0_to_Fmax += damage_yi[bin_idx] * partial_width
+
+        damage_integral = total_damage_integral - damage_integral_0_to_Fmax
         damage_part = damage_integral - (1.0 - Fmax) * damage_at_Fmax
 
         # Tax revenue (uniform redistribution cancels out)
@@ -309,15 +333,37 @@ def find_Fmin_analytical(
     float
         Fmin value such that progressive redistribution yields target_subsidy.
     """
+    # Pre-compute cumulative damage integrals at bin edges for fast lookup
+    # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
+    bin_widths = np.diff(Fi_edges)
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_yi * bin_widths)))
+
     def subsidy_minus_target(Fmin):
         # Lorenz contribution from Pareto distribution
         lorenz_part = y_gross * (
             Fmin * L_pareto_derivative(Fmin, gini) - L_pareto(Fmin, gini)
         )
 
-        # Damage contribution using stepwise functions
-        damage_integral = stepwise_integrate(0.0, Fmin, damage_yi, Fi_edges)
-        damage_at_Fmin = stepwise_interpolate(Fmin, damage_yi, Fi_edges)
+        # Fast damage calculation using pre-computed cumulative integrals
+        # Find which bin Fmin is in
+        bin_idx = np.searchsorted(Fi_edges, Fmin, side='right') - 1
+        bin_idx = np.clip(bin_idx, 0, len(damage_yi) - 1)
+
+        # Damage at Fmin is constant within bin (stepwise function)
+        damage_at_Fmin = damage_yi[bin_idx]
+
+        # Integral from 0 to Fmin = cumulative up to bin start + partial bin
+        if Fmin <= Fi_edges[0]:
+            damage_integral = 0.0
+        elif Fmin >= Fi_edges[-1]:
+            damage_integral = damage_cumulative[-1]
+        else:
+            # Cumulative up to start of bin containing Fmin
+            damage_integral = damage_cumulative[bin_idx]
+            # Add partial contribution from within the bin
+            partial_width = Fmin - Fi_edges[bin_idx]
+            damage_integral += damage_yi[bin_idx] * partial_width
+
         damage_part = Fmin * damage_at_Fmin - damage_integral
 
         # Subsidy amount (uniform redistribution cancels out)
