@@ -9,21 +9,16 @@ import numpy as np
 from scipy.special import roots_legendre
 from distribution_utilities import (
     y_of_F_after_damage,
-    segment_integral_with_cut,
-    total_tax_top,
-    total_tax_bottom,
     find_Fmax_analytical,
     find_Fmin_analytical,
     L_pareto,
     L_pareto_derivative,
     crra_utility_interval,
-    crra_utility_integral_with_damage,
-    climate_damage_integral,
     stepwise_interpolate,
     stepwise_integrate
 )
 from parameters import evaluate_params_at_time
-from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, MAX_ITERATIONS, N_QUAD, INVERSE_EPSILON
+from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, N_QUAD
 
 
 def calculate_tendencies(state, params, Climate_damage_yi_prev, xi, xi_edges, wi, store_detailed_output=True):

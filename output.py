@@ -335,7 +335,7 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         'delta_T',  # Global mean temperature change
         # Production chain
         'Y_gross',  # Gross production before climate damage
-        'Climate_Damage',  # Total climate damage (Y_gross * Omega)
+        'Climate_damage',  # Total climate damage (Y_gross * Omega)
         'Y_damaged',  # Output after climate damage before abatement
         # Costs and net
         'AbateCost',  # Total abatement expenditure
@@ -374,7 +374,7 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         'Ecum': ('Cumulative CO2 emissions', 'tCO2'),
         'delta_T': ('Global mean temperature change', '°C'),
         'Omega': ('Climate damage as fraction of gross output', 'dimensionless'),
-        'Climate_Damage': ('Total climate damage', '$/yr'),
+        'Climate_damage': ('Total climate damage', '$/yr'),
         'Y_damaged': ('Output after climate damage before abatement', '$/yr'),
         'AbateCost': ('Total abatement expenditure', '$/yr'),
         'Y_net': ('Output net of climate damage and abatement cost', '$/yr'),
