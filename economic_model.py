@@ -340,7 +340,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             _timing_stats['find_Fmax_time'] += time.time() - t_before_fmax
         else:
             # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega))
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega_prev))
             Fmax = 1.0
 
         # Find Fmin using current Omega_base
