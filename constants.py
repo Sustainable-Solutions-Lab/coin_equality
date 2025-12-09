@@ -52,8 +52,5 @@ INVERSE_EPSILON = 1.0 / EPSILON
 # Set to 256 to allow slow but steady convergence during optimization
 MAX_ITERATIONS = 256
 
-# Number of Gauss-Legendre quadrature points for numerical integration
-# Used for:
-# - Integrating income distributions over rank F
-# - Computing tax and redistribution amounts
-N_QUAD = 32
+# N_QUAD removed - now specified in config.integration_params.n_quad
+# This enforces explicit configuration (no defaults per CLAUDE.md)

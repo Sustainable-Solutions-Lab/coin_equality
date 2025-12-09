@@ -101,6 +101,8 @@
         "_t_end": "Integrate for 400 years",
         "dt": 1.0,
         "_dt": "1-year time step (Euler method)",
+        "n_quad": 16,
+        "_n_quad": "Number of Gauss-Legendre quadrature points for income distribution integration. Higher values = more accurate but slower. Typical: 16 (testing), 32 (production), 64 (high precision).",
         "rtol": 1e-06,
         "atol": 1e-09,
         "_tolerances": "Reserved for future adaptive solvers",

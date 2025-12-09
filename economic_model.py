@@ -18,7 +18,7 @@ from distribution_utilities import (
     stepwise_integrate
 )
 from parameters import evaluate_params_at_time
-from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, N_QUAD
+from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM
 
 
 def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, store_detailed_output=True):
@@ -195,7 +195,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         U = NEG_BIGNUM
         E = 0.0
         dK_dt = -delta * K
-        climate_damage_yi = np.zeros(N_QUAD)
+        climate_damage_yi = np.zeros_like(xi)
     else:
         # Economy exists - proceed with calculations
         
@@ -315,7 +315,8 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         climate_damage_yi = np.zeros_like(xi)
         aggregate_utility = 0.0
 
-        print(f"DEBUG SETUP: Omega_prev={Omega_prev:.6e}, Omega_base={Omega_base:.6e}, y_gross={y_gross:.6e}")
+        print(f"DEBUG SETUP: Omega_prev={Omega_prev:.6e}, Omega_base={Omega_base:.6e}, y_gross={y_gross:.6e}, Fmin={Fmin:.6e}, Fmax={Fmax:.6e}")
+        print(f"DEBUG Fi_edges: {Fi_edges}")
         print(f"DEBUG SETUP: climate_damage_yi_prev min={np.min(climate_damage_yi_prev):.6e}, max={np.max(climate_damage_yi_prev):.6e}, mean={np.mean(climate_damage_yi_prev):.6e}")
 
         # Segment 1: Low-income earners receiving income-dependent redistribution [0, Fmin]
@@ -382,8 +383,20 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             )
             max_consumption = max_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
-            climate_damage_max = max_y_net * Omega_base * (max_y_net/y_net_reference)**(-y_damage_distribution_exponent)
-            climate_damage_max = np.clip(climate_damage_max, 0.0, max_y_net)
+            ratio = max_y_net/y_net_reference
+            exponent = -y_damage_distribution_exponent
+            ratio_to_power = ratio**exponent
+            climate_damage_max_unclipped = max_y_net * Omega_base * ratio_to_power
+
+            max_y_net_float = float(np.asarray(max_y_net).flat[0]) if hasattr(max_y_net, '__len__') else float(max_y_net)
+            ratio_float = float(np.asarray(ratio).flat[0]) if hasattr(ratio, '__len__') else float(ratio)
+            exponent_float = float(np.asarray(exponent).flat[0]) if hasattr(exponent, '__len__') else float(exponent)
+            ratio_to_power_float = float(np.asarray(ratio_to_power).flat[0]) if hasattr(ratio_to_power, '__len__') else float(ratio_to_power)
+            climate_damage_max_unclipped_float = float(np.asarray(climate_damage_max_unclipped).flat[0]) if hasattr(climate_damage_max_unclipped, '__len__') else float(climate_damage_max_unclipped)
+
+            print(f"DEBUG SEG3 CALC: max_y_net={max_y_net_float:.6e}, Omega_base={Omega_base:.6e}, ratio={ratio_float:.6e}, exponent={exponent_float:.6e}, ratio**exponent={ratio_to_power_float:.6e}")
+            print(f"DEBUG SEG3 CALC: climate_damage_max_unclipped={climate_damage_max_unclipped_float:.6e}")
+            climate_damage_max = np.clip(climate_damage_max_unclipped, 0.0, max_y_net)
 
             max_y_net_val = np.asarray(max_y_net).flat[0] if hasattr(max_y_net, '__len__') else max_y_net
             climate_damage_max_val = np.asarray(climate_damage_max).flat[0] if hasattr(climate_damage_max, '__len__') else climate_damage_max
@@ -458,6 +471,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             print(f"DEBUG SEG2: After segment 2, climate_damage_yi sum={np.sum(Fwi * climate_damage_yi):.6e}")
 
         print(f"DEBUG ALL SEGMENTS: Final climate_damage_yi min={np.min(climate_damage_yi):.6e}, max={np.max(climate_damage_yi):.6e}, sum={np.sum(Fwi * climate_damage_yi):.6e}")
+        print(f"DEBUG climate_damage_yi array: {climate_damage_yi}")
 
         if not income_dependent_aggregate_damage:
             total_climate_damage_pre_scale = np.sum(Fwi * climate_damage_yi)
@@ -586,17 +600,21 @@ def integrate_model(config, store_detailed_output=True):
     t_start = config.integration_params.t_start
     t_end = config.integration_params.t_end
     dt = config.integration_params.dt
+    n_quad = config.integration_params.n_quad
 
     # Create time array
     t_array = np.arange(t_start, t_end + dt, dt)
     n_steps = len(t_array)
 
     # Precompute Gauss-Legendre quadrature nodes and weights (used for all timesteps)
-    xi, wi = roots_legendre(N_QUAD)
-    xi_edges = 2.0* np.concatenate(([0.0], np.cumsum(wi))) - 1.0  # length N_QUAD + 1
+    xi, wi = roots_legendre(n_quad)
+    # Create xi_edges: cumulative weights starting at -1, ending at +1
+    # wi sums to 2 (integrating over [-1,1]), so cumsum(wi) goes from wi[0] to 2
+    # We want edges from -1 to +1, so: -1 + cumsum(wi) goes from -1+wi[0] to 1
+    xi_edges = np.concatenate(([-1.0], -1.0 + np.cumsum(wi)))  # length n_quad + 1
 
     # Initialize climate damage and Omega from previous timestep for first timestep
-    climate_damage_yi_prev = np.zeros(N_QUAD)
+    climate_damage_yi_prev = np.zeros(n_quad)
     Omega_prev = 0.0
 
     # Calculate initial state

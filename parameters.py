@@ -378,6 +378,9 @@ class IntegrationParameters:
         End time for integration (yr)
     dt : float
         Time step for Euler integration (yr)
+    n_quad : int
+        Number of Gauss-Legendre quadrature points for income distribution integration.
+        Higher values = more accurate but slower. Typical: 16 (testing), 32 (production), 64 (high precision).
     rtol : float
         Relative tolerance for ODE solver (reserved for future use)
     atol : float
@@ -389,6 +392,7 @@ class IntegrationParameters:
     t_start: float
     t_end: float
     dt: float
+    n_quad: int
     rtol: float
     atol: float
     plot_short_horizon: float
