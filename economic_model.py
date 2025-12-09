@@ -21,7 +21,7 @@ from parameters import evaluate_params_at_time
 from constants import EPSILON, LOOSE_EPSILON, NEG_BIGNUM, N_QUAD
 
 
-def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, wi, store_detailed_output=True):
+def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -147,12 +147,6 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
     Fmin = 0.0
     Fmax = 1.0
 
-    # Use climate damage from previous timestep (per-capita $/person, passed as parameter)
-    # Integrate over F-space to get average per-capita damage, then multiply by current L for total
-    # conserve money despite changing population in lagged damage calculation
-    Climate_damage_prev = np.sum(Fwi * climate_damage_yi_L_prev)  # Total damage ($)
-    climate_damage_yi_prev = climate_damage_yi_L_prev / L  # Already per-capita ($/person)
-
     #========================================================================================
     # Main calculations
 
@@ -164,15 +158,12 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
         Y_gross = 0.0
         y_gross = 0.0
 
-    # Calculate Omega using last time step's climate damage but this time step's gross production
-    # Error from using previous time step to calculate Omega an be made arbitrarily small by decreasing dt
-    Omega = Climate_damage_prev / Y_gross if Y_gross > 0 else 0.0  # Base climate damage fraction from previous timestep
+    # Use Omega from previous timestep for budgeting and damage calculations
+    Y_damaged = Y_gross * (1.0 - Omega_prev) # Gross production net of climate damage
+    y_damaged = y_gross * (1.0 - Omega_prev) # gross production per capita net of climate damage
 
-    Y_damaged = Y_gross * (1.0 - Omega) # Gross production net of climate damage
-    y_damaged = y_gross * (1.0 - Omega) # gross production per capita net of climate damage
-
-    Climate_damage = Omega * Y_gross
-    climate_damage = Omega * y_gross # per capita climate damage
+    Climate_damage = Omega_prev * Y_gross
+    climate_damage = Omega_prev * y_gross # per capita climate damage
 
     # Eq 2.2: Temperature change from cumulative emissions
     delta_T = k_climate * Ecum
@@ -203,11 +194,10 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
         E = 0.0
         dK_dt = -delta * K
         climate_damage_yi = np.zeros(N_QUAD)
-        climate_damage_yi_L = np.zeros(N_QUAD)
     else:
         # Economy exists - proceed with calculations
         
-        available_for_redistribution_and_abatement = fract_gdp * y_gross * (1.0 - min(Omega,1.0))
+        available_for_redistribution_and_abatement = fract_gdp * y_gross * (1.0 - min(Omega_prev,1.0))
 
         if income_redistribution:
             redistribution_amount = (1 - f) * available_for_redistribution_and_abatement
@@ -230,7 +220,7 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
         if income_dependent_tax_policy:
             tax_amount = abateCost_amount + redistribution_amount
         else:
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega))
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega_prev))
             Fmax = 1.0                # Eq 1.3: Production after climate damage
 
         AbateCost = abateCost_amount * L  # total abatement cost
@@ -316,7 +306,6 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
         lorenz_fractions_yi = L_pareto(Fi_edges[1:], gini) - L_pareto(Fi_edges[:-1],gini) # fraction of income in each bin
         lorenz_ratio_yi = lorenz_fractions_yi/Fwi # ratio of mean income in each bin to aggregate mean income
 
-        y_damaged_yi = lorenz_ratio_yi * y_gross - climate_damage_yi_prev
         y_net_yi = np.zeros_like(xi)
         consumption_yi = np.zeros_like(xi)
         utility_yi = np.zeros_like(xi)
@@ -444,13 +433,17 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
             # Gauss-Legendre quadrature over [Fmin, Fmax]: (Fmax-Fmin)/2 maps from [-1,1] to [Fmin,Fmax]
             aggregate_utility += (Fmax - Fmin) / 2.0 * np.sum(wi * utility_vals)
 
+
         if not income_dependent_aggregate_damage:
+            total_climate_damage_pre_scale = np.sum(Fwi * climate_damage_yi)
             # Adjust climate damage to match Omega_base
-            total_climate_damage = np.sum(Fwi * climate_damage_yi)
-            climate_damage_yi = climate_damage_yi * (Omega_base * y_gross) / total_climate_damage
+            print(f"DEBUG: Before rescaling - total_climate_damage_pre_scale = {total_climate_damage_pre_scale:.6e}, Omega_base = {Omega_base:.6e}, y_gross = {y_gross:.6e}")
+            print(f"DEBUG: Rescaling factor = {(Omega_base * y_gross) / total_climate_damage_pre_scale:.6e}")
+            climate_damage_yi = climate_damage_yi * (Omega_base * y_gross) / total_climate_damage_pre_scale
 
-        climate_damage_yi_L = climate_damage_yi * L  # total climate damage ($) at each F bin
-
+        total_climate_damage_after = np.sum(Fwi * climate_damage_yi)
+        Omega = total_climate_damage_after / y_gross  # Recalculate Omega based on current damage distribution
+        print(f"DEBUG: After rescaling - total_climate_damage = {total_climate_damage_after:.6e}, y_gross = {y_gross:.6e}, Omega = {Omega:.6e}")
 
     #========================================================================================
 
@@ -515,7 +508,8 @@ def calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, 
     })
 
     # Always return climate damage distribution for use in next time step
-    results['climate_damage_yi'] = climate_damage_yi_L  # Store total climate damage ($/population) for next timestep
+    results['climate_damage_yi'] = climate_damage_yi  # Store total climate damage ($/population) for next timestep
+    results['Omega'] = Omega  # Store total climate damage ($/population) for next timestep
 
 
     return results
@@ -572,8 +566,9 @@ def integrate_model(config, store_detailed_output=True):
     xi, wi = roots_legendre(N_QUAD)
     xi_edges = 2.0* np.concatenate(([0.0], np.cumsum(wi))) - 1.0  # length N_QUAD + 1
 
-    # Initialize climate damage from previous timestep to zeros for first timestep
-    climate_damage_yi_L_prev = np.zeros(N_QUAD)
+    # Initialize climate damage and Omega from previous timestep for first timestep
+    climate_damage_yi_prev = np.zeros(N_QUAD)
+    Omega_prev = 0.0
 
     # Calculate initial state
     A0 = config.time_functions['A'](t_start)
@@ -681,8 +676,8 @@ def integrate_model(config, store_detailed_output=True):
         params = evaluate_params_at_time(t, config)
 
         # Calculate all variables and tendencies at current time
-        # Pass climate_damage_yi_L_prev to use lagged damage (avoids circular dependency)
-        outputs = calculate_tendencies(state, params, climate_damage_yi_L_prev, xi, xi_edges, wi, store_detailed_output)
+        # Pass climate_damage_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
+        outputs = calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -738,7 +733,8 @@ def integrate_model(config, store_detailed_output=True):
             # do not allow cumulative emissions to go negative, making it colder than the initial condition
             state['Ecum'] = max(0.0, state['Ecum'] + dt * outputs['dEcum_dt'])
 
-            # Update climate damage for next time step (lagged damage approach)
-            climate_damage_yi_L_prev = outputs['climate_damage_yi']
+            # Update climate damage and Omega for next time step (lagged damage approach)
+            climate_damage_yi_prev = outputs['climate_damage_yi']
+            Omega_prev = outputs['Omega']
 
     return results
