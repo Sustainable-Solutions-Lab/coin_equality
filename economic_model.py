@@ -320,27 +320,49 @@ def calculate_tendencies(state, params, previous_step_values, xi, xi_edges, wi, 
             climate_damage_yi = climate_damage_yi + \
                 climate_damage_max * np.clip(Fi_edges[1:] - np.maximum(Fi_edges[:-1], Fmax), 0, Fwi) / Fwi
 
-                # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
-        Climate_Damage_yi = None  # Climate damage at quadrature points for next timestep
+        # Segment 2: Middle-income earners with uniform redistribution/tax [Fmin, Fmax]
         if Fmax - Fmin > EPSILON:
-            # Utility for middle segment - integrate over income distribution
-
+            # Calculate y_net for each bin in the middle segment
             y_vals_Fi = y_of_F_after_damage(
                 Fi, Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate), 
-                uniform_redistribution_amount, climate_damage_yi_prev,
-                uniform_redistribution_amount, gini,
+                y_gross * (1 - uniform_tax_rate),
+                uniform_redistribution_amount, climate_damage_yi_prev, gini,
             )
 
-            # Compute climate damage at quadrature points for next timestep
+            # Calculate climate damage at quadrature points for next timestep
             if np.abs(y_damage_distribution_exponent) < EPSILON:
                 # Uniform damage
-                Climate_Damage_yi = np.full_like(y_vals, Omega_base)
+                climate_damage_yi_mid = np.full_like(y_vals_Fi, Omega_base * y_vals_Fi)
             else:
-                # Income-dependent damage - use current income to compute damage for next timestep
-                Climate_Damage_yi = Omega_base * (y_vals / y_net_reference) ** y_damage_distribution_exponent
+                # Income-dependent damage
+                climate_damage_yi_mid = Omega_base * y_vals_Fi * (y_vals_Fi / y_net_reference) ** y_damage_distribution_exponent
 
-            consumption_vals = y_vals * (1 - s)
+            climate_damage_yi_mid = np.clip(climate_damage_yi_mid, 0.0, y_vals_Fi)
+
+            # Set y_net_yi and climate_damage_yi for bins in [Fmin, Fmax]
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i] >= Fmin and Fi_edges[i+1] <= Fmax:
+                    # Bin completely within [Fmin, Fmax]
+                    y_net_yi[i] = y_vals_Fi[i]
+                    climate_damage_yi[i] = climate_damage_yi_mid[i]
+                elif Fi_edges[i] < Fmin <= Fi_edges[i+1] < Fmax:
+                    # Bin contains Fmin - add weighted contribution for part above Fmin
+                    fraction_above = (Fi_edges[i+1] - Fmin) / Fwi[i]
+                    y_net_yi[i] += y_vals_Fi[i] * fraction_above
+                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_above
+                elif Fmin < Fi_edges[i] < Fmax <= Fi_edges[i+1]:
+                    # Bin contains Fmax - add weighted contribution for part below Fmax
+                    fraction_below = (Fmax - Fi_edges[i]) / Fwi[i]
+                    y_net_yi[i] += y_vals_Fi[i] * fraction_below
+                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_below
+                elif Fi_edges[i] < Fmin and Fmax <= Fi_edges[i+1]:
+                    # Bin contains both Fmin and Fmax - only the middle part
+                    fraction_middle = (Fmax - Fmin) / Fwi[i]
+                    y_net_yi[i] += y_vals_Fi[i] * fraction_middle
+                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_middle
+
+            # Calculate aggregate utility for middle segment
+            consumption_vals = y_vals_Fi * (1 - s)
             if eta == 1:
                 utility_vals = np.log(consumption_vals)
             else:
