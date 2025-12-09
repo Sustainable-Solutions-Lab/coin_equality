@@ -348,7 +348,6 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         'redistribution',  # Per-capita redistribution amount
         'Redistribution_amount',  # Total redistribution amount
         'U',  # Mean utility per capita
-        'discounted_utility',  # Discounted utility per capita
         # Dimensionless variables
         'Omega',  # Climate damage as fraction of gross output
         'Lambda',  # Abatement cost as fraction of damaged output
@@ -389,7 +388,6 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         'redistribution': ('Per-capita redistribution amount', '$/person/yr'),
         'Redistribution_amount': ('Total redistribution amount', '$/yr'),
         'U': ('Mean utility per capita', 'dimensionless'),
-        'discounted_utility': ('Discounted utility per capita', 'dimensionless'),
         's': ('Savings rate', 'dimensionless'),
         'f': ('Control: fraction allocated to abatement vs redistribution', 'dimensionless'),
         'marginal_abatement_cost': ('Marginal abatement cost (social cost of carbon)', '$/tCO2'),

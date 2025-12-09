@@ -179,12 +179,11 @@ def create_results_report_pdf(case_data, output_pdf):
         ('Lambda', 'Abatement cost fraction', 'Abatement Cost (% of Output)'),
         ('AbateCost', 'Abatement cost ($/yr)', 'Total Abatement Cost'),
         ('Omega', 'Climate damage fraction', 'Climate Damage (% of Output)'),
-        ('Climate_Damage', 'Climate damage ($/yr)', 'Total Climate Damage'),
+        ('Climate_damage', 'Climate damage ($/yr)', 'Total Climate Damage'),
 
         # Inequality and Utility
         ('Gini', 'Gini before redistribution', 'Background Gini Index'),
         ('U', 'Mean utility', 'Mean Utility Per Capita'),
-        ('discounted_utility', 'Discounted utility', 'Discounted Utility Per Capita'),
         ('redistribution', 'Per-capita redistribution ($/person/yr)', 'Per-Capita Redistribution'),
         ('Redistribution_amount', 'Total redistribution ($/yr)', 'Total Redistribution'),
 
@@ -491,12 +490,11 @@ def create_results_report_pdf_to_existing(case_data, pdf):
         ('Lambda', 'Abatement cost fraction', 'Abatement Cost (% of Output)'),
         ('AbateCost', 'Abatement cost ($/yr)', 'Total Abatement Cost'),
         ('Omega', 'Climate damage fraction', 'Climate Damage (% of Output)'),
-        ('Climate_Damage', 'Climate damage ($/yr)', 'Total Climate Damage'),
+        ('Climate_damage', 'Climate damage ($/yr)', 'Total Climate Damage'),
 
         # Inequality and Utility
         ('Gini', 'Gini before redistribution', 'Background Gini Index'),
         ('U', 'Mean utility', 'Mean Utility Per Capita'),
-        ('discounted_utility', 'Discounted utility', 'Discounted Utility Per Capita'),
         ('redistribution', 'Per-capita redistribution ($/person/yr)', 'Per-Capita Redistribution'),
         ('Redistribution_amount', 'Total redistribution ($/yr)', 'Total Redistribution'),
 

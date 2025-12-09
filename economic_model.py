@@ -466,7 +466,6 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
     if store_detailed_output:
         # Additional calculated variables for detailed output only
         marginal_abatement_cost = theta1 * mu ** (theta2 - 1)  # Social cost of carbon
-        discounted_utility = U * np.exp(-rho * t)  # Discounted utility
 
         # Return full diagnostics for CSV/PDF output
         results.update({
@@ -500,7 +499,6 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             'Climate_damage': Climate_damage,
             'Savings': Savings,
             'Consumption': Consumption,
-            'discounted_utility': discounted_utility,
             's': s,  # Savings rate (currently constant, may become time-dependent)
         })
 
@@ -637,7 +635,6 @@ def integrate_model(config, store_detailed_output=True):
             'Climate_damage': np.zeros(n_steps),
             'Savings': np.zeros(n_steps),
             'Consumption': np.zeros(n_steps),
-            'discounted_utility': np.zeros(n_steps),
             's': np.zeros(n_steps),
         })
 
@@ -704,7 +701,6 @@ def integrate_model(config, store_detailed_output=True):
             results['Climate_damage'][i] = outputs['Climate_damage']
             results['Savings'][i] = outputs['Savings']
             results['Consumption'][i] = outputs['Consumption']
-            results['discounted_utility'][i] = outputs['discounted_utility']
             results['s'][i] = outputs['s']
 
         # Euler step: update state for next iteration (skip on last step)
