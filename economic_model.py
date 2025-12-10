@@ -209,7 +209,6 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
     Y_damaged = Y_gross * (1.0 - Omega_prev) # Gross production net of climate damage
     y_damaged = y_gross * (1.0 - Omega_prev) # gross production per capita net of climate damage
 
-    Climate_damage = Omega_prev * Y_gross
     climate_damage = Omega_prev * y_gross # per capita climate damage
 
     # Scale climate_damage_yi_prev so its sum matches current aggregate climate_damage
@@ -236,16 +235,11 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
         Omega = 0.0
-        Climate_damage = 0.0
         Y_damaged = 0.0
-        Savings = 0.0
         Lambda = 0.0
         AbateCost = 0.0
         Y_net = 0.0
-        Redistribution_amount = 0.0
-        Consumption = 0.0
         y_net = 0.0
-        redistribution = 0.0
         mu = 0.0
         U = NEG_BIGNUM
         E = 0.0
@@ -290,16 +284,6 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
 
         Y_net = Y_damaged - AbateCost # Eq 1.8: Net production after abatement cost
         y_net = y_damaged - abateCost_amount  # Eq 1.9: per capita income after abatement cost
-
-        Consumption = (1-s) * Y_net
-        consumption = (1-s) * y_net  # mean per capita consumption
-
-        Savings = s * Y_net  # Total savings
-        savings = s * y_net  # per capita savings
-
-        # Redistribution tracking
-        redistribution = redistribution_amount  # Per capita redistribution (same as redistribution_amount)
-        Redistribution_amount = redistribution_amount * L  # total redistribution amount
 
         # Eq 2.1: Potential emissions (unabated)
         Epot = sigma * Y_gross
@@ -369,7 +353,6 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         y_net_yi = np.zeros_like(xi)
         consumption_yi = np.zeros_like(xi)
         utility_yi = np.zeros_like(xi)
-        consumption_yi = np.zeros_like(xi)
         climate_damage_yi = np.zeros_like(xi)
         aggregate_utility = 0.0
 
@@ -528,6 +511,15 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         # Additional calculated variables for detailed output only
         marginal_abatement_cost = theta1 * mu ** (theta2 - 1)  # Social cost of carbon
 
+        # Calculate gross and per capita variants for output
+        Climate_damage = Omega_prev * Y_gross  # Total climate damage
+        Consumption = (1 - s) * Y_net  # Total consumption
+        consumption = (1 - s) * y_net  # Per capita consumption
+        Savings = s * Y_net  # Total savings
+        savings = s * y_net  # Per capita savings
+        redistribution = redistribution_amount  # Per capita redistribution (same as redistribution_amount)
+        Redistribution_amount = redistribution_amount * L  # Total redistribution amount
+
         # Return full diagnostics for CSV/PDF output
         results.update({
             'dK_dt': dK_dt,
@@ -559,7 +551,9 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             'E': E,
             'Climate_damage': Climate_damage,
             'Savings': Savings,
+            'savings': savings,
             'Consumption': Consumption,
+            'consumption': consumption,
             's': s,  # Savings rate (currently constant, may become time-dependent)
         })
 
@@ -706,7 +700,9 @@ def integrate_model(config, store_detailed_output=True):
             'dEcum_dt': np.zeros(n_steps),
             'Climate_damage': np.zeros(n_steps),
             'Savings': np.zeros(n_steps),
+            'savings': np.zeros(n_steps),
             'Consumption': np.zeros(n_steps),
+            'consumption': np.zeros(n_steps),
             's': np.zeros(n_steps),
         })
 
@@ -773,7 +769,9 @@ def integrate_model(config, store_detailed_output=True):
             results['dEcum_dt'][i] = outputs['dEcum_dt']
             results['Climate_damage'][i] = outputs['Climate_damage']
             results['Savings'][i] = outputs['Savings']
+            results['savings'][i] = outputs['savings']
             results['Consumption'][i] = outputs['Consumption']
+            results['consumption'][i] = outputs['consumption']
             results['s'][i] = outputs['s']
 
         # Euler step: update state for next iteration (skip on last step)
