@@ -14,18 +14,14 @@ A simple-as-possible stylized representation of the tradeoff between investment 
   - [Time-Dependent Functions](#time-dependent-functions)
   - [Control Variables](#control-variables)
   - [Integration Parameters](#integration-parameters)
-  - [Initial Conditions (Computed Automatically)](#initial-conditions-computed-automatically)
 - [Model Features](#model-features)
   - [Simplifying Assumptions](#simplifying-assumptions)
   - [Key Insights](#key-insights)
 - [Implementation: Key Functions](#implementation-key-functions)
 - [Parameter Organization](#parameter-organization)
   - [Configuration File Structure](#configuration-file-structure)
-  - [Initial Conditions](#initial-conditions)
   - [Example Configuration](#example-configuration)
   - [Loading Configuration](#loading-configuration)
-- [Unit Testing: Validating Analytical Solutions](#unit-testing-validating-analytical-solutions)
-  - [Unit Test for Equation (1.2): Climate Damage](#unit-test-for-equation-12-climate-damage)
   - [Testing the Forward Model](#testing-the-forward-model)
   - [Running Optimizations with Parameter Overrides](#running-optimizations-with-parameter-overrides)
   - [Running Multiple Optimizations in Parallel](#running-multiple-optimizations-in-parallel)
@@ -44,7 +40,6 @@ A simple-as-possible stylized representation of the tradeoff between investment 
   - [Iterative Refinement Optimization](#iterative-refinement-optimization)
   - [Optimization Stopping Criteria](#optimization-stopping-criteria)
   - [Dual Optimization (f and s)](#dual-optimization-f-and-s)
-- [Next Steps](#next-steps)
 - [Dual Optimization of Savings Rate and Abatement Allocation](#dual-optimization-of-savings-rate-and-abatement-allocation)
 - [Project Structure](#project-structure)
 - [References](#references)
@@ -383,9 +378,6 @@ The model uses a lagged damage approach for explicit (non-iterative) calculation
 - ✓ Uses `INVERSE_EPSILON` constant from `constants.py` (no hardcoded values)
 - ✓ All existing unit tests pass
 
-**Future Enhancements**:
-For more sophisticated treatment of `f_gdp >= 1` with non-Pareto income distributions, see **Next Steps, Section 2**.
-
 #### 5. Gini Index Dynamics and Persistence
 
 The Gini index consists of two components: an **exogenous background** `gini(t)` and an **endogenous perturbation** `delta_Gini(t)` that evolves over time.
@@ -589,13 +581,6 @@ The model has 5 boolean switches controlling different policy features. Three ar
 | `rtol` | Relative tolerance (reserved for future use) | - | `rtol` |
 | `atol` | Absolute tolerance (reserved for future use) | - | `atol` |
 
-### Initial Conditions (Computed Automatically)
-
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `K(0)` | `(s·A(0)/δ)^(1/(1-α))·L(0)` | Steady-state capital stock |
-| `Ecum(0)` | `0` | No cumulative emissions at start |
-
 ## Model Features
 
 ### Simplifying Assumptions
@@ -755,55 +740,6 @@ Each JSON configuration file must contain:
 
 See `config_baseline.json` for extensive examples of documentation.
 
-### Initial Conditions
-
-Initial conditions are **computed automatically**:
-
-- **`Ecum(0) = Ecum_initial`**: Initial cumulative emissions from configuration (defaults to 0.0 if not specified)
-- **`delta_Gini(0) = 0.0`**: Initial perturbation from background Gini (system starts at background level)
-- **`Gini(0) = gini(0)`**: Total initial Gini equals the background value
-- **`K(0)`**: Initial capital stock accounting for climate damage and abatement costs
-
-**Initial Capital Stock Calculation:**
-
-The initial capital stock K(0) is determined iteratively to ensure consistency with climate damage from initial cumulative emissions and the initial abatement allocation. This differs from a simple steady-state calculation because:
-
-1. **Climate damage reduces net production**: With initial temperature change ΔT(0) = k_climate · Ecum_initial, the economy experiences damage Ω that reduces effective output available for capital accumulation.
-
-2. **Abatement costs reduce net production**: The initial control policy f(0) allocates resources to abatement, further reducing net production available for capital accumulation.
-
-**Iterative Solution Method:**
-
-Starting from the steady-state relationship:
-```
-K₀ = [(s · (1 - Ω) · (1 - λ) · A(0)) / δ]^(1/(1-α)) · L(0)
-```
-where:
-- `Ω` = aggregate climate damage fraction (depends on K₀ through y_gross)
-- `λ = (1-s) · f(0) · f_gdp` = abatement cost fraction
-
-The algorithm iterates until Ω converges (tolerance: 1e-12):
-
-1. **Initialize**: Compute initial estimate of Ω from ΔT and typical income
-2. **Iterate**:
-   - Calculate K₀ using current Ω estimate
-   - Calculate y_gross = A(0) · (K₀^α) · (L(0)^(1-α)) / L(0)
-   - Update Ω from income-dependent climate damage function
-   - Check convergence: |Ω_new - Ω_old| < ε
-3. **Converge**: Typically converges in 2-5 iterations
-
-**Special Cases:**
-- If `Ecum_initial = 0`: Converges immediately (Ω = 0, no climate damage)
-- If `f(0) = 0`: No abatement cost (λ = 0)
-- If both zero: Reduces to simple steady state K₀ = (s·A(0)/δ)^(1/(1-α)) · L(0)
-
-This initialization ensures the model starts from an economically consistent state that accounts for:
-- Pre-existing climate change impacts on production and inequality
-- Initial policy allocation between abatement and redistribution
-- Income-dependent climate vulnerability of the population
-
-The iteration count is printed during model execution for debugging purposes.
-
 ### Example Configuration
 
 See `config_baseline.json` for a complete example. To create new scenarios, copy and modify this file.
@@ -851,58 +787,6 @@ config = load_configuration('config_baseline.json')
 ```
 
 The `evaluate_params_at_time(t, config)` helper combines all parameters into a dict for use with `calculate_tendencies()`.
-
-## Unit Testing: Validating Analytical Solutions
-
-The project includes unit tests that validate the analytical solutions for key model equations by comparing them against high-precision numerical integration.
-
-### Unit Test for Equation (1.2): Climate Damage
-
-**Note:** The current model uses a power-law damage function ω(y) = Ω_base · (y / y_net_reference)^y_damage_distribution_exponent with lagged damage calculation and analytical Lorenz integrals. The file `unit_test_eq1.2.py` and earlier analytical approaches have been deprecated and replaced by the current implementation.
-
-**Current Numerical Approach:**
-
-Climate damage is computed by integrating the power-law damage function over three income segments using Gauss-Legendre quadrature (N_QUAD = 32 points):
-
-```python
-# Damage function at income y
-ω(y) = Ω_base · (y / y_net_reference)^y_damage_distribution_exponent
-
-# Aggregate damage fraction via integration
-aggregate_damage_fraction = ∫₀¹ ω(y(F)) dF
-Ω = aggregate_damage_fraction
-```
-
-The integration is performed in `climate_damage_integral()` from `utility_integrals.py`, with income at each rank F computed via `y_of_F_after_damage()`. For the special case of `y_damage_distribution_exponent = 0.5`, an analytic solution using the quadratic formula is employed for computational efficiency. For other exponent values, numerical root finding via scipy.optimize.fsolve is used.
-
-**Analytic Solution for Exponent = 0.5:**
-
-When `y_damage_distribution_exponent = 0.5`, the implicit equation for income after damage can be solved analytically. The equation:
-```
-y_after_damage = A - B · sqrt(y_after_damage / y_net_reference)
-```
-where `A` includes the pre-damage income, redistribution, and damage-free components, and `B = omega_base · sqrt(y_net_reference)`.
-
-Substituting `t = sqrt(y_after_damage)` yields a quadratic equation:
-```
-t² + B · t - A = 0
-```
-with solution:
-```
-t = (-B + sqrt(B² + 4A)) / 2
-y_after_damage = t²
-```
-
-This analytic solution provides ~1000× speedup compared to iterative numerical methods, reducing computation time from minutes to seconds for typical optimization runs.
-
-**Convergence Algorithm:**
-
-The model uses a lagged damage approach to avoid iterative convergence:
-1. Initialize Omega_base from temperature: Ω_base = psi1·ΔT + psi2·ΔT²
-2. Use previous timestep's income distribution and damage to compute current period's income
-3. Integrate damage over current income distribution to get aggregate_damage_fraction
-4. Update Omega = aggregate_damage_fraction for use in next timestep
-5. This explicit calculation eliminates the need for within-timestep convergence loops
 
 ### Testing the Forward Model
 
@@ -1792,38 +1676,6 @@ To test prescribed s(t) trajectories without optimization:
 ```
 
 This runs the model with f=0.5 and s declining linearly from 0.30 to 0.20, without invoking dual optimization.
-
-## Next Steps
-
-The following tasks are prioritized to prepare the model for production use and publication:
-
-### 1. Debug Model for Income Redistribution Cases
-
-Verify and debug the model to ensure it is working correctly for income redistribution scenarios:
-- Test model behavior across range of inequality levels (Gini coefficients)
-- Validate income redistribution mechanics and effective Gini calculations
-- Check that climate damage with income-dependent effects produces physically reasonable results
-- Verify that optimization converges to sensible policies for redistribution vs. abatement tradeoff
-- Document any issues discovered and ensure all calculations are correct
-
-### 2. Explore Model Sensitivities
-
-Systematically explore how model results depend on key parameters and assumptions:
-- Parameter sensitivity analysis (discount rate, risk aversion, damage functions, etc.)
-- Sensitivity to initial conditions (initial capital, cumulative emissions, inequality)
-- Sensitivity to time-dependent function specifications (TFP growth, population, carbon intensity)
-- Document parameter ranges that produce realistic and stable model behavior
-- Identify which parameters most strongly influence optimal policies
-
-### 3. Design and Execute Production Simulations
-
-Design and run the final simulation suite for publication:
-- Define baseline and alternative scenarios to be presented in the paper
-- Create production configuration files for each scenario
-- Run optimizations to determine optimal policies
-- Generate publication-quality figures and tables
-- Document key results and policy insights
-- Ensure reproducibility of all results
 
 ## Dual Optimization of Savings Rate and Abatement Allocation
 
