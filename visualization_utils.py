@@ -303,7 +303,11 @@ def create_objective_scatter_on_axes(ax, optimization_data):
     ax.set_title('Objective Improvement by Iteration', fontsize=11, fontweight='bold')
     ax.set_xticks(range(len(case_names)))
     ax.set_xticklabels(case_names, rotation=45, ha='right', fontsize=8)
-    ax.legend(loc='best', fontsize=8)
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=8)
+
     ax.grid(True, alpha=0.3, linestyle='--')
     ax.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
 
@@ -352,7 +356,11 @@ def create_elapsed_time_scatter_on_axes(ax, optimization_data):
     ax.set_title('Computation Time Comparison', fontsize=11, fontweight='bold')
     ax.set_xticks(range(len(case_names)))
     ax.set_xticklabels(case_names, rotation=45, ha='right', fontsize=8)
-    ax.legend(loc='best', fontsize=8)
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=8)
+
     ax.grid(True, alpha=0.3, linestyle='--')
 
 
@@ -400,7 +408,11 @@ def create_evaluations_scatter_on_axes(ax, optimization_data):
     ax.set_title('Evaluations Comparison', fontsize=11, fontweight='bold')
     ax.set_xticks(range(len(case_names)))
     ax.set_xticklabels(case_names, rotation=45, ha='right', fontsize=8)
-    ax.legend(loc='best', fontsize=8)
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc='best', fontsize=8)
+
     ax.grid(True, alpha=0.3, linestyle='--')
 
 
