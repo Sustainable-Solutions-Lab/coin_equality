@@ -85,7 +85,7 @@ The differential equation solver uses climate damage from the previous timestep 
 5. **ΔT** from Ecum, k_climate (Eq 2.2: temperature from cumulative emissions)
 6. **y_gross** from Y_gross, L (mean per-capita gross income before climate damage)
 7. **Omega** = Climate_Damage_prev / Y_gross (climate damage fraction using previous damage)
-8. **Omega_base** from ΔT, psi1, psi2 (base climate damage from temperature for next timestep)
+8. **Omega_base** from ΔT, psi1, psi2 (base climate damage coefficient from temperature: ψ₁·ΔT + ψ₂·ΔT²)
 
 **Tax and Redistribution (using previous damage):**
 9. **redistribution_amount** from fract_gdp, f, y_gross, Omega (total per-capita redistribution)
@@ -173,6 +173,7 @@ The model uses climate damage from the previous timestep to avoid circular depen
 2. Use previous timestep's income distribution to compute current damage
 3. This allows explicit (non-iterative) calculation of income distribution
 4. Climate damage is updated each timestep based on the previous period's economic state
+5. When `income_dependent_aggregate_damage = false`, damage distribution is rescaled so total damage = Ω_base × y_net_aggregate
 
 **Physical Interpretation:**
 - As `y_damage_distribution_exponent → 0`: damage becomes uniform across income (no income effect)
@@ -558,7 +559,8 @@ The model has 5 boolean switches controlling different policy features. Three ar
    - **Only meaningful when parent is true**
    - Controls how aggregate damage is calculated when damage varies by income
    - When true: Aggregate damage computed directly from income distribution
-   - When false: Use uniform `Omega_base` from temperature (no income-dependent adjustment)
+   - When false: Rescale damage distribution to match `Omega_base * y_net_aggregate`, where `y_net_aggregate` is mean net income after taxes/transfers
+   - Note: When `income_dependent_damage_distribution = false`, damages are naturally proportional to `y_net`, so this flag has no effect
    - Code enforces: Only checked when `income_dependent_damage_distribution` is true
 
 5. **`income_dependent_redistribution_policy`** (boolean, default: false)
@@ -1201,8 +1203,9 @@ Climate damage depends on income distribution, which itself depends on climate d
 3. Compute critical income ranks (Fmin, Fmax) using analytical Lorenz integrals with stepwise damage functions
 4. Calculate income at each rank using `y_of_F_lagged_damage()` with previous period's damage
 5. Integrate climate damage and utility over three segments: [0, Fmin), [Fmin, Fmax), [Fmax, 1]
-6. Update Omega from integrated aggregate_damage_fraction for use in next timestep
-7. No within-timestep iteration required - all calculations are explicit
+6. If `income_dependent_aggregate_damage = false` and `income_dependent_damage_distribution = true`, rescale damage to match Ω_base × y_net_aggregate
+7. Update Omega from integrated damage for use in next timestep
+8. No within-timestep iteration required - all calculations are explicit
 
 **Performance Characteristics:**
 - **No convergence loops**: Each timestep calculates income distribution explicitly using previous damage
@@ -1268,11 +1271,11 @@ The results dictionary contains arrays for:
 - **Aggregate integrals**: `aggregate_utility`
 - **Investment/Consumption**: `Savings`, `savings`, `Consumption`, `consumption`
 - **Inequality/utility**: `Gini`, `G_eff`, `Gini_climate`, `U`, `discounted_utility`
-- **Distribution diagnostics**: `gini_y_net`, `gini_consumption`, `gini_climate_damage`, `delta_gini_y_net`, `delta_gini_consumption`, `delta_gini_climate_damage`, `cv_utility`
+- **Distribution diagnostics**: `gini_consumption`, `gini_climate_damage`, `gini_utility`, `delta_gini_consumption`, `delta_gini_climate_damage`, `delta_gini_utility`
 - **Tendencies**: `dK_dt`, `dEcum_dt`, `d_delta_Gini_dt`, `delta_Gini_step_change`
 
 **Variables from lagged damage calculation:**
-- **Omega_base**: Base climate damage from temperature (used for next timestep)
+- **Omega_base**: Base climate damage coefficient from temperature: ψ₁·ΔT + ψ₂·ΔT². When `income_dependent_aggregate_damage = false`, total damage equals `Omega_base * y_net_aggregate`
 - **y_damaged**: Per-capita gross production after climate damage
 - **climate_damage**: Per-capita climate damage
 - **Fmin**: Maximum income rank receiving targeted redistribution
@@ -1282,15 +1285,14 @@ The results dictionary contains arrays for:
 - **uniform_tax_rate**: Uniform tax rate (if not progressive)
 
 **Distribution diagnostics (inequality measures calculated from discretized distributions):**
-- **gini_y_net**: Gini coefficient of net income distribution (after taxes/transfers)
 - **gini_consumption**: Gini coefficient of consumption distribution
 - **gini_climate_damage**: Gini coefficient of climate damage distribution
-- **delta_gini_y_net**: Difference from input Gini (gini_y_net - gini)
+- **gini_utility**: Gini coefficient of utility distribution (0 when eta >= 1)
 - **delta_gini_consumption**: Difference from input Gini (gini_consumption - gini)
 - **delta_gini_climate_damage**: Difference from input Gini (gini_climate_damage - gini)
-- **cv_utility**: Coefficient of variation of utility distribution (weighted std / weighted mean)
+- **delta_gini_utility**: Difference from input Gini (gini_utility - gini, 0 when eta >= 1)
 
-These diagnostics help track how redistribution and climate damage policies affect inequality across different variables. The Gini coefficients are computed from the discretized distributions at Gauss-Legendre quadrature points using the Lorenz curve integral: Gini = 2 ∫₀¹ (F - L(F)) dF. The coefficient of variation for utility is used instead of a Gini coefficient because utility can have negative values when η > 1.
+These diagnostics help track how redistribution and climate damage policies affect inequality across different variables. The Gini coefficients are computed from the discretized distributions at Gauss-Legendre quadrature points using the Lorenz curve integral: Gini = 2 ∫₀¹ (F - L(F)) dF. The utility Gini is only calculated when η < 1, since utility can have negative values when η ≥ 1.
 
 All arrays have the same length corresponding to time points from `t_start` to `t_end` in steps of `dt`.
 

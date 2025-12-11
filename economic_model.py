@@ -535,11 +535,13 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
 
         _timing_stats['segment2_time'] += time.time() - t_before_seg2
 
-        if not income_dependent_aggregate_damage:
+        if not income_dependent_aggregate_damage and income_dependent_damage_distribution:
+            # Only rescale if we have income-dependent distribution but want aggregate to match temperature-based damage
+            # Rescale to match Omega_base * y_net (consistent with uniform distribution case)
             total_climate_damage_pre_scale = np.sum(Fwi * climate_damage_yi)
-            # Adjust climate damage to match Omega_base
-            if total_climate_damage_pre_scale > 0:
-                climate_damage_yi = climate_damage_yi * (Omega_base * y_gross) / total_climate_damage_pre_scale
+            y_net_aggregate = np.sum(Fwi * y_net_yi)
+            if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
+                climate_damage_yi = climate_damage_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
 
         Omega = np.sum(Fwi * climate_damage_yi) / y_gross  # Recalculate Omega based on current damage distribution
 
