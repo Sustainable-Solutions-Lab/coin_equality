@@ -575,39 +575,32 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             # Calculate consumption_yi from y_net_yi for Gini calculation
             consumption_yi_full = y_net_yi * (1 - s)
 
-            gini_y_net = gini_from_distribution(y_net_yi, Fi_edges, Fwi)
             gini_consumption = gini_from_distribution(consumption_yi_full, Fi_edges, Fwi)
             gini_climate_damage = gini_from_distribution(climate_damage_yi, Fi_edges, Fwi)
 
-            delta_gini_y_net = gini_y_net - gini
             delta_gini_consumption = gini_consumption - gini
             delta_gini_climate_damage = gini_climate_damage - gini
 
-            # Calculate coefficient of variation for utility (std / mean)
             # Compute utility_yi from consumption_yi
             if eta == 1:
                 utility_yi_full = np.log(np.maximum(consumption_yi_full, EPSILON))
             else:
                 utility_yi_full = (np.maximum(consumption_yi_full, EPSILON) ** (1 - eta)) / (1 - eta)
 
-            # Weighted mean and standard deviation
-            mean_utility = np.sum(Fwi * utility_yi_full)
-            variance_utility = np.sum(Fwi * (utility_yi_full - mean_utility) ** 2)
-            std_utility = np.sqrt(variance_utility)
-
-            # Coefficient of variation (handle case where mean is zero or near-zero)
-            if np.abs(mean_utility) > EPSILON:
-                cv_utility = std_utility / np.abs(mean_utility)
+            # Calculate utility Gini only when eta < 1
+            if eta < 1:
+                gini_utility = gini_from_distribution(utility_yi_full, Fi_edges, Fwi)
+                delta_gini_utility = gini_utility - gini
             else:
-                cv_utility = 0.0
+                gini_utility = 0.0
+                delta_gini_utility = 0.0
         else:
-            gini_y_net = 0.0
             gini_consumption = 0.0
             gini_climate_damage = 0.0
-            delta_gini_y_net = 0.0
             delta_gini_consumption = 0.0
             delta_gini_climate_damage = 0.0
-            cv_utility = 0.0
+            gini_utility = 0.0
+            delta_gini_utility = 0.0
 
         # Return full diagnostics for CSV/PDF output
         results.update({
@@ -644,13 +637,12 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             'Consumption': Consumption,
             'consumption': consumption,
             's': s,  # Savings rate (currently constant, may become time-dependent)
-            'gini_y_net': gini_y_net,  # Gini coefficient of net income distribution
             'gini_consumption': gini_consumption,  # Gini coefficient of consumption distribution
             'gini_climate_damage': gini_climate_damage,  # Gini coefficient of climate damage distribution
-            'delta_gini_y_net': delta_gini_y_net,  # Change in Gini from input (net income)
+            'gini_utility': gini_utility,  # Gini coefficient of utility distribution (0 when eta >= 1)
             'delta_gini_consumption': delta_gini_consumption,  # Change in Gini from input (consumption)
             'delta_gini_climate_damage': delta_gini_climate_damage,  # Change in Gini from input (climate damage)
-            'cv_utility': cv_utility,  # Coefficient of variation of utility (std/mean)
+            'delta_gini_utility': delta_gini_utility,  # Change in Gini from input (utility, 0 when eta >= 1)
         })
 
     # Return minimal variables needed for optimization
@@ -800,13 +792,12 @@ def integrate_model(config, store_detailed_output=True):
             'Consumption': np.zeros(n_steps),
             'consumption': np.zeros(n_steps),
             's': np.zeros(n_steps),
-            'gini_y_net': np.zeros(n_steps),
             'gini_consumption': np.zeros(n_steps),
             'gini_climate_damage': np.zeros(n_steps),
-            'delta_gini_y_net': np.zeros(n_steps),
+            'gini_utility': np.zeros(n_steps),
             'delta_gini_consumption': np.zeros(n_steps),
             'delta_gini_climate_damage': np.zeros(n_steps),
-            'cv_utility': np.zeros(n_steps),
+            'delta_gini_utility': np.zeros(n_steps),
         })
 
     # Always store time, state variables, and objective function variables
@@ -876,13 +867,12 @@ def integrate_model(config, store_detailed_output=True):
             results['Consumption'][i] = outputs['Consumption']
             results['consumption'][i] = outputs['consumption']
             results['s'][i] = outputs['s']
-            results['gini_y_net'][i] = outputs['gini_y_net']
             results['gini_consumption'][i] = outputs['gini_consumption']
             results['gini_climate_damage'][i] = outputs['gini_climate_damage']
-            results['delta_gini_y_net'][i] = outputs['delta_gini_y_net']
+            results['gini_utility'][i] = outputs['gini_utility']
             results['delta_gini_consumption'][i] = outputs['delta_gini_consumption']
             results['delta_gini_climate_damage'][i] = outputs['delta_gini_climate_damage']
-            results['cv_utility'][i] = outputs['cv_utility']
+            results['delta_gini_utility'][i] = outputs['delta_gini_utility']
 
         # Euler step: update state for next iteration (skip on last step)
         if i < n_steps - 1:
