@@ -9,6 +9,7 @@ import csv
 import shutil
 from datetime import datetime
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.ticker import FuncFormatter
@@ -45,7 +46,11 @@ VARIABLE_METADATA = {
     'Savings': {'description': 'Gross Investment', 'units': '$/yr', 'group': 'economic'},
     's': {'description': 'Savings Rate', 'units': '', 'group': 'policy'},
     'gini': {'description': 'Background Gini Index', 'units': '', 'group': 'inequality'},
-    'Gini': {'description': 'Gini Index', 'units': '', 'group': 'inequality'}
+    'Gini': {'description': 'Gini Index', 'units': '', 'group': 'inequality'},
+    'Fmin': {'description': 'Minimum Income Rank Boundary', 'units': '', 'group': 'inequality'},
+    'Fmax': {'description': 'Maximum Income Rank Boundary', 'units': '', 'group': 'inequality'},
+    'min_y_net': {'description': 'Net Income at Fmin', 'units': '$/person', 'group': 'inequality'},
+    'max_y_net': {'description': 'Net Income at Fmax', 'units': '$/person', 'group': 'inequality'}
 }
 
 # Variable grouping for organized layout with combined charts
@@ -289,7 +294,7 @@ def write_optimization_summary(opt_results, sensitivity_results, output_dir, fil
     return csv_path
 
 
-def write_results_csv(results, output_dir, filename='results.csv'):
+def write_results_csv(results, output_dir, run_name='', filename='results.csv'):
     """
     Write results dictionary to CSV file.
 
@@ -299,6 +304,8 @@ def write_results_csv(results, output_dir, filename='results.csv'):
         Results dictionary from integrate_model()
     output_dir : str
         Directory to write CSV file
+    run_name : str
+        Name of the model run (prepended to filename)
     filename : str
         Name of CSV file
 
@@ -312,7 +319,10 @@ def write_results_csv(results, output_dir, filename='results.csv'):
     Each column is a variable, each row is a time point.
     First row contains variable names (header).
     """
-    csv_path = os.path.join(output_dir, filename)
+    if run_name:
+        csv_path = os.path.join(output_dir, f"{run_name}_{filename}")
+    else:
+        csv_path = os.path.join(output_dir, filename)
 
     # Define column order as specified
     ordered_columns = [
@@ -426,6 +436,84 @@ def write_results_csv(results, output_dir, filename='results.csv'):
     return csv_path
 
 
+def write_distribution_xlsx(results, output_dir, run_name, filename='distributions.xlsx'):
+    """
+    Write income distribution data to Excel file with multiple sheets.
+
+    Parameters
+    ----------
+    results : dict
+        Results dictionary from integrate_model()
+    output_dir : str
+        Directory to write Excel file
+    run_name : str
+        Name of the model run (added to filename)
+    filename : str
+        Name of Excel file (default: 'distributions.xlsx')
+
+    Returns
+    -------
+    str
+        Path to created Excel file
+
+    Notes
+    -----
+    Creates Excel file with sheets:
+    - 'Quadrature_Info': xi, wi, xi_edges, Fi, Fwi, Fi_edges
+    - 'y_net_yi': Per capita net income distribution over time
+    - 'climate_damage_yi': Per capita climate damage distribution over time
+    - 'utility_yi': Utility distribution over time
+
+    Each distribution sheet has time in the first column and income bins in remaining columns.
+    """
+    # Check if distribution data is available
+    if 'y_net_yi' not in results:
+        print("Warning: Distribution data not available, skipping xlsx output")
+        return None
+
+    xlsx_path = os.path.join(output_dir, f"{run_name}_{filename}")
+
+    with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
+        # Sheet 1: Quadrature information
+        quad_df = pd.DataFrame({
+            'xi': results['xi'],
+            'wi': results['wi'],
+            'Fi': results['Fi'],
+            'Fwi': results['Fwi'],
+        })
+        # Add edges separately since they have different length
+        max_len = max(len(results['xi']), len(results['xi_edges']))
+        quad_df_full = pd.DataFrame(index=range(max_len))
+        quad_df_full['xi'] = pd.Series(results['xi'])
+        quad_df_full['wi'] = pd.Series(results['wi'])
+        quad_df_full['xi_edges'] = pd.Series(results['xi_edges'])
+        quad_df_full['Fi'] = pd.Series(results['Fi'])
+        quad_df_full['Fwi'] = pd.Series(results['Fwi'])
+        quad_df_full['Fi_edges'] = pd.Series(results['Fi_edges'])
+        quad_df_full.to_excel(writer, sheet_name='Quadrature_Info', index=False)
+
+        # Sheet 2: y_net_yi (net income distribution)
+        t = results['t']
+        n_bins = results['y_net_yi'].shape[1]
+        bin_names = [f'bin_{i}' for i in range(n_bins)]
+        y_net_df = pd.DataFrame(results['y_net_yi'], columns=bin_names)
+        y_net_df.insert(0, 't', t)
+        y_net_df.to_excel(writer, sheet_name='y_net_yi', index=False)
+
+        # Sheet 3: climate_damage_yi (climate damage distribution)
+        damage_df = pd.DataFrame(results['climate_damage_yi'], columns=bin_names)
+        damage_df.insert(0, 't', t)
+        damage_df.to_excel(writer, sheet_name='climate_damage_yi', index=False)
+
+        # Sheet 4: utility_yi (utility distribution)
+        utility_df = pd.DataFrame(results['utility_yi'], columns=bin_names)
+        utility_df.insert(0, 't', t)
+        utility_df.to_excel(writer, sheet_name='utility_yi', index=False)
+
+    print(f"Distribution data saved to: {xlsx_path}")
+    return xlsx_path
+
+
 def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config_filename=None, use_first_90_percent_for_ylim=False):
     """
     Create PDF with time series plots of all variables, organized by topic with combined charts.
@@ -455,7 +543,7 @@ def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config
     Creates multi-page PDF organized by variable groups (economic, climate, etc.).
     Supports both single-variable and multi-variable combined charts.
     """
-    pdf_path = os.path.join(output_dir, filename)
+    pdf_path = os.path.join(output_dir, f"{run_name}_{filename}")
 
     # Get time array
     t = results['t']
@@ -735,11 +823,13 @@ def save_results(results, run_name, plot_short_horizon=None, output_dir=None, co
     """
     if output_dir is None:
         output_dir = create_output_directory(run_name)
-    csv_file = write_results_csv(results, output_dir)
+    csv_file = write_results_csv(results, output_dir, run_name)
+    xlsx_file = write_distribution_xlsx(results, output_dir, run_name)
 
     output_dict = {
         'output_dir': output_dir,
         'csv_file': csv_file,
+        'xlsx_file': xlsx_file,
     }
 
     if plot_short_horizon is not None:

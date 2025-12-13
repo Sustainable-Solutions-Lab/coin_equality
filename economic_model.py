@@ -243,6 +243,8 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     uniform_tax_rate = 0.0
     Fmin = 0.0
     Fmax = 1.0
+    min_y_net = 0.0
+    max_y_net = 0.0
 
     #========================================================================================
     # Main calculations
@@ -430,15 +432,23 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             climate_damage_min = min_y_net * Omega_base * (min_y_net/y_net_reference)**(-y_damage_distribution_exponent)
             climate_damage_min = np.clip(climate_damage_min, 0.0, min_y_net)
 
-            # Set climate_damage_yi for bins below Fmin (same approach as y_net_yi)
+            # Calculate utility for segment 1
+            if eta == 1:
+                min_utility = np.log(np.maximum(min_consumption, EPSILON))
+            else:
+                min_utility = (np.maximum(min_consumption, EPSILON) ** (1 - eta)) / (1 - eta)
+
+            # Set climate_damage_yi and utility_yi for bins below Fmin (same approach as y_net_yi)
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i+1] <= Fmin:
                     # Bin completely below Fmin
                     climate_damage_yi[i] = climate_damage_min
+                    utility_yi[i] = min_utility
                 elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
                     # Bin containing Fmin - weight by fraction below Fmin
                     fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
                     climate_damage_yi[i] = climate_damage_min * fraction_below
+                    utility_yi[i] = min_utility * fraction_below
 
         _timing_stats['segment1_time'] += time.time() - t_before_seg1
 
@@ -468,15 +478,23 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             climate_damage_max = max_y_net * Omega_base * (max_y_net/y_net_reference)**(-y_damage_distribution_exponent)
             climate_damage_max = np.clip(climate_damage_max, 0.0, max_y_net)
 
-            # Set climate_damage_yi for bins above Fmax (same approach as y_net_yi)
+            # Calculate utility for segment 3
+            if eta == 1:
+                max_utility = np.log(np.maximum(max_consumption, EPSILON))
+            else:
+                max_utility = (np.maximum(max_consumption, EPSILON) ** (1 - eta)) / (1 - eta)
+
+            # Set climate_damage_yi and utility_yi for bins above Fmax (same approach as y_net_yi)
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i] >= Fmax:
                     # Bin completely above Fmax
                     climate_damage_yi[i] = climate_damage_max
+                    utility_yi[i] = max_utility
                 elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
                     # Bin containing Fmax - weight by fraction above Fmax
                     fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
                     climate_damage_yi[i] = climate_damage_max * fraction_above
+                    utility_yi[i] = max_utility * fraction_above
 
         _timing_stats['segment3_time'] += time.time() - t_before_seg3
 
@@ -500,34 +518,39 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
 
             climate_damage_yi_mid = np.clip(climate_damage_yi_mid, 0.0, y_vals_Fi)
 
-            # Set y_net_yi and climate_damage_yi for bins in [Fmin, Fmax]
+            # Calculate consumption and utility for middle segment
+            consumption_vals = y_vals_Fi * (1 - s)
+            if eta == 1:
+                utility_vals = np.log(np.maximum(consumption_vals, EPSILON))
+            else:
+                utility_vals = (np.maximum(consumption_vals, EPSILON) ** (1 - eta)) / (1 - eta)
+
+            # Set y_net_yi, climate_damage_yi, and utility_yi for bins in [Fmin, Fmax]
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i] >= Fmin and Fi_edges[i+1] <= Fmax:
                     # Bin completely within [Fmin, Fmax]
                     y_net_yi[i] = y_vals_Fi[i]
                     climate_damage_yi[i] = climate_damage_yi_mid[i]
+                    utility_yi[i] = utility_vals[i]
                 elif Fi_edges[i] < Fmin <= Fi_edges[i+1] < Fmax:
                     # Bin contains Fmin - add weighted contribution for part above Fmin
                     fraction_above = (Fi_edges[i+1] - Fmin) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_above
                     climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_above
+                    utility_yi[i] += utility_vals[i] * fraction_above
                 elif Fmin < Fi_edges[i] < Fmax <= Fi_edges[i+1]:
                     # Bin contains Fmax - add weighted contribution for part below Fmax
                     fraction_below = (Fmax - Fi_edges[i]) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_below
                     climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_below
+                    utility_yi[i] += utility_vals[i] * fraction_below
                 elif Fi_edges[i] < Fmin and Fmax <= Fi_edges[i+1]:
                     # Bin contains both Fmin and Fmax - only the middle part
                     fraction_middle = (Fmax - Fmin) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_middle
                     climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_middle
+                    utility_yi[i] += utility_vals[i] * fraction_middle
 
-            # Calculate aggregate utility for middle segment
-            consumption_vals = y_vals_Fi * (1 - s)
-            if eta == 1:
-                utility_vals = np.log(consumption_vals)
-            else:
-                utility_vals = (consumption_vals ** (1 - eta)) / (1 - eta)
             # Gauss-Legendre quadrature over [Fmin, Fmax]: (Fmax-Fmin)/2 maps from [-1,1] to [Fmin,Fmax]
             aggregate_utility += (Fmax - Fmin) / 2.0 * np.sum(wi * utility_vals)
 
@@ -624,6 +647,8 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             'uniform_tax_rate': uniform_tax_rate,  # Uniform tax rate
             'Fmin': Fmin,  # Minimum income rank boundary
             'Fmax': Fmax,  # Maximum income rank boundary
+            'min_y_net': min_y_net,  # Net income at Fmin
+            'max_y_net': max_y_net,  # Net income at Fmax
             'aggregate_utility': aggregate_utility,  # Aggregate utility from integration
             'mu': mu,
             'Lambda': Lambda,
@@ -643,6 +668,9 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             'delta_gini_consumption': delta_gini_consumption,  # Change in Gini from input (consumption)
             'delta_gini_climate_damage': delta_gini_climate_damage,  # Change in Gini from input (climate damage)
             'delta_gini_utility': delta_gini_utility,  # Change in Gini from input (utility, 0 when eta >= 1)
+            'y_net_yi': y_net_yi,  # Per capita net income distribution across quadrature points
+            'climate_damage_yi': climate_damage_yi,  # Per capita climate damage distribution across quadrature points
+            'utility_yi': utility_yi,  # Utility distribution across quadrature points
         })
 
     # Return minimal variables needed for optimization
@@ -798,6 +826,11 @@ def integrate_model(config, store_detailed_output=True):
             'delta_gini_consumption': np.zeros(n_steps),
             'delta_gini_climate_damage': np.zeros(n_steps),
             'delta_gini_utility': np.zeros(n_steps),
+            'min_y_net': np.zeros(n_steps),
+            'max_y_net': np.zeros(n_steps),
+            'y_net_yi': np.zeros((n_steps, n_quad)),  # Per capita net income distribution
+            'climate_damage_yi': np.zeros((n_steps, n_quad)),  # Per capita climate damage distribution
+            'utility_yi': np.zeros((n_steps, n_quad)),  # Utility distribution
         })
 
     # Always store time, state variables, and objective function variables
@@ -808,6 +841,17 @@ def integrate_model(config, store_detailed_output=True):
         'U': np.zeros(n_steps),
         'L': np.zeros(n_steps),  # Needed for objective function
     })
+
+    # Store quadrature information (for xlsx output)
+    if store_detailed_output:
+        results.update({
+            'xi': xi,
+            'wi': wi,
+            'xi_edges': xi_edges,
+            'Fi': (xi + 1.0) / 2.0,
+            'Fwi': wi / 2.0,
+            'Fi_edges': (xi_edges + 1.0) / 2.0,
+        })
 
     # Time stepping loop
     for i, t in enumerate(t_array):
@@ -873,6 +917,11 @@ def integrate_model(config, store_detailed_output=True):
             results['delta_gini_consumption'][i] = outputs['delta_gini_consumption']
             results['delta_gini_climate_damage'][i] = outputs['delta_gini_climate_damage']
             results['delta_gini_utility'][i] = outputs['delta_gini_utility']
+            results['min_y_net'][i] = outputs['min_y_net']
+            results['max_y_net'][i] = outputs['max_y_net']
+            results['y_net_yi'][i, :] = outputs['y_net_yi']
+            results['climate_damage_yi'][i, :] = outputs['climate_damage_yi']
+            results['utility_yi'][i, :] = outputs['utility_yi']
 
         # Euler step: update state for next iteration (skip on last step)
         if i < n_steps - 1:
