@@ -40,7 +40,6 @@ A simple-as-possible stylized representation of the tradeoff between investment 
   - [Iterative Refinement Optimization](#iterative-refinement-optimization)
   - [Optimization Stopping Criteria](#optimization-stopping-criteria)
   - [Dual Optimization (f and s)](#dual-optimization-f-and-s)
-- [Dual Optimization of Savings Rate and Abatement Allocation](#dual-optimization-of-savings-rate-and-abatement-allocation)
 - [Project Structure](#project-structure)
 - [References](#references)
 - [License](#license)
@@ -1679,218 +1678,6 @@ To test prescribed s(t) trajectories without optimization:
 
 This runs the model with f=0.5 and s declining linearly from 0.30 to 0.20, without invoking dual optimization.
 
-## Dual Optimization of Savings Rate and Abatement Allocation
-
-### Overview
-
-The model now supports simultaneous optimization of both:
-1. **f(t)** - allocation fraction between abatement and redistribution
-2. **s(t)** - savings rate (fraction of net output invested)
-
-This capability allows the model to optimize the tradeoff between present Consumption and future Consumption (via savings/investment) while simultaneously optimizing the allocation of resources between climate mitigation and inequality reduction.
-
-**Implementation Status:** ✅ Infrastructure complete (Phases 1-5 done)
-- Dual control functions operational
-- Independent control points for f and s
-- Full backward compatibility maintained
-- Economic behavior validated
-
-**Remaining Work:** Phase 6 (documentation and visualization), plus automated dual optimization method (future work)
-
-### Implementation Plan
-
-The implementation will parallel the existing optimization structure for f(t), creating independent control points and decision times for s(t):
-
-#### Phase 1: Make Savings Rate Time-Dependent
-**Status:** ✅ Completed
-
-1. **Move s from scalar_params to time_functions** ✅
-   - Removed `s` from `ScalarParameters` dataclass in `parameters.py`
-   - Added `s` to time-dependent functions in configuration files
-   - Updated `evaluate_params_at_time()` to evaluate `s(t)` from time functions
-   - s(t) is evaluated at each timestep and can be bounded by configuration
-
-2. **Update all code references to s** ✅
-   - In `economic_model.py`: s is now treated as time-dependent parameter from `params` dict
-   - In `integrate_model()`: s is obtained from `evaluate_params_at_time(t_start, config)`
-   - Initial capital iteration correctly uses time-dependent s(0)
-   - Verified s is correctly stored in results and output to CSV
-
-3. **Update configuration files** ✅
-   - Converted `s` from scalar parameter to time function in both config files:
-     - `config_test_DICE.json`
-     - `config_test_DICE_2x_0.02_10k_0.67.json`
-   - Using `"type": "constant"` with same value (0.23974) to preserve behavior
-   - Tested: time-dependent s(t) = constant reproduces previous results exactly
-
-4. **Documentation updates** ✅
-   - Updated `test_integration.py` to display s(0) from time_functions
-   - Docstrings in `evaluate_params_at_time()` updated to list s as time-dependent
-   - s is now part of the time-dependent evaluation pipeline alongside A, L, sigma, theta1
-
-#### Phase 2: Extend Control Function Structure
-**Status:** ✅ Completed
-
-1. **Modify control function to return both f and s** ✅
-   - Created `create_dual_control_from_single(f_control, s_time_function)` to wrap f control and s time function
-   - Created `create_dual_control_from_specs(f_spec, s_spec)` for future dual control specifications
-   - Control function now returns tuple `(f, s)` instead of scalar
-
-2. **Update ModelConfiguration** ✅
-   - `control_function` now returns `(f(t), s(t))` tuple
-   - In `load_configuration()`, f control is wrapped with s time function to create dual control
-   - Clean transition: f comes from control_function spec, s from time_functions
-
-3. **Update evaluate_params_at_time()** ✅
-   - Unpacks tuple from control_function: `f, s = config.control_function(t)`
-   - Both f and s are added to params dict for use by economic model
-   - Removed direct s evaluation from time_functions (now comes from control function)
-
-4. **Verified integrate_model() compatibility** ✅
-   - No changes needed in integrate_model() - all control function calls go through evaluate_params_at_time()
-   - Both f and s correctly stored in results and CSV output
-   - Backward compatibility maintained: constant s(t) produces identical results
-
-#### Phase 3: Extend Optimization Framework
-**Status:** ✅ Completed (Infrastructure)
-
-1. **Created dual control function builder** ✅
-   - Added `create_dual_control_function_from_points(f_control_points, s_control_points)` in optimization.py
-   - Interpolates f and s independently using separate control point sets
-   - Returns callable function: `(f, s) = control_function(t)`
-   - Supports different numbers of control points and time spacing for each variable
-
-2. **Extended calculate_objective for dual control** ✅
-   - Added optional parameters: `s_control_values` and `s_control_times`
-   - **Backward compatible**: If s parameters omitted, uses fixed s from time_functions
-   - **Dual mode**: If s parameters provided, optimizes both f and s independently
-   - Both control values clamped to [0, 1] automatically
-
-3. **Verified backward compatibility** ✅
-   - Tested: Single-variable optimization (f only) works identically to before
-   - s remains fixed from configuration when not explicitly optimized
-   - Existing optimization workflows unchanged
-   - Objective function calculation: 3.28e13 (verified)
-
-4. **Infrastructure ready for full dual optimization**
-   - Foundation in place for extending `optimize_control_function()` to handle dual parameter vectors
-   - Can manually optimize both f and s by calling `calculate_objective()` with full parameter sets
-   - Future work: Integrate into `optimize_control_function()` and iterative refinement for automated dual optimization
-
-**Current capabilities:**
-- ✅ Optimize f while keeping s fixed (default, backward compatible)
-- ✅ Infrastructure supports dual optimization via direct calls to `calculate_objective()`
-- ⏳ Automated dual optimization via `optimize_control_function()` (Phase 4+)
-
-#### Phase 4: Configuration and Initial Guesses
-**Status:** ✅ Completed
-
-1. **Updated configuration file structure** ✅
-   - Added optional `s_control_function` field parallel to `control_function`
-   - If `s_control_function` present: s is treated as control variable
-   - If absent: s comes from `time_functions['s']` (backward compatible)
-   - Clean precedence: s_control_function > time_functions['s']
-
-2. **Extended OptimizationParameters dataclass** ✅
-   - Dual optimization uses same `optimization_iterations` for both f and s
-   - Added `initial_guess_s`: float, parallel to `initial_guess_f` for f
-   - Added `s_n_points_final`: int, for iterative refinement of s
-   - Added `is_dual_optimization()` method to check if optimizing both f and s
-   - All fields optional with None default (backward compatible)
-
-3. **Updated load_configuration()** ✅
-   - Checks for optional `s_control_function` in JSON
-   - If present: creates dual control from both f and s control functions
-   - If absent: creates dual control from f control + s time function (default)
-   - Uses `create_dual_control_from_specs()` for dual control mode
-
-4. **Created test configurations** ✅
-   - Created `config_test_dual_simple.json` with both f and s as controls
-   - Tested with constant values: f=0.5, s=0.24
-   - Verified integration works correctly
-   - Confirmed CSV output shows s from s_control_function (0.24) not time_functions (0.23974)
-
-**Current capabilities:**
-- ✅ Configuration files can specify dual optimization
-- ✅ OptimizationParameters track both f and s control specifications
-- ✅ Full backward compatibility when s_control_function absent
-- ✅ Infrastructure ready for automated dual optimization in future phases
-
-#### Phase 5: Testing and Validation
-**Status:** ✅ Completed
-
-1. **Verify backward compatibility** ✅
-   - ✅ With s(t) = constant, results match previous version exactly (objective 3.28e13)
-   - ✅ All existing configurations run correctly
-
-2. **Test time-dependent s** ✅
-   - ✅ Linear ramp s: 0.20→0.30 trajectory verified
-   - ✅ Economic variables respond correctly to changing s(t)
-   - ✅ Capital accumulation dynamics work as expected
-
-3. **Test dual optimization infrastructure** ✅
-   - ✅ Single control point for both (2D optimization via grid search)
-   - ✅ Multiple control points with same number (n_f = n_s = 3)
-   - ✅ Multiple control points with different numbers (n_f = 2, n_s = 4 and vice versa)
-   - ⚠️ Iterative refinement not yet implemented (deferred to future work)
-
-4. **Verify economic sensibility** ✅
-   - ✅ Different s(t) trajectories produce different outcomes (0.51% variation)
-   - ✅ Best constant s = 0.30 in typical range [0.20, 0.35]
-   - ✅ Higher savings improves utility by 0.17% over baseline
-   - ✅ Declining s trajectory outperforms increasing s (matches economic intuition)
-
-**Key accomplishments:**
-- Dual control infrastructure fully functional
-- Independent control points for f and s verified
-- Economic behavior consistent with growth theory
-- Full backward compatibility maintained
-
-#### Phase 6: Documentation and Output
-**Status:** ✅ Completed
-
-1. **Update README.md** ✅
-   - ✅ Documented dual control variable framework in "Control Variables" section
-   - ✅ Added "Dual Optimization (f and s)" section in "Optimization Configuration"
-   - ✅ Explained s(t) optimization and configuration options
-   - ✅ Added examples of dual optimization configurations (basic and multi-point)
-   - ✅ Documented backward compatibility behavior
-   - ✅ Showed example of prescribed s(t) trajectory testing
-
-2. **Update output visualization** ✅
-   - ✅ s(t) plotted alongside f(t) in "Control Variables" combined chart
-   - ✅ Both variables shown in dimensionless_ratios plot group
-   - ✅ Visualization automatically handles both single and dual optimization modes
-   - ✅ Uses existing combined chart infrastructure for clean f/s comparison
-
-3. **Update optimization summary output** ✅
-   - ✅ write_optimization_summary() reports optimal f(t) control points
-   - ✅ write_optimization_summary() reports optimal s(t) control points (when present)
-   - ✅ Separate sections for f and s control point tables
-   - ✅ Infrastructure ready for full dual optimization method (future work)
-
-**Key accomplishments:**
-- Complete documentation of dual control framework
-- User-facing examples for all dual optimization modes
-- Output visualization supports both f and s
-- Optimization summary ready for dual optimization results
-
-### Key Design Decisions
-
-1. **Independent control times**: Each variable (f, s) has its own set of control times, allowing different temporal resolution where needed
-
-2. **Parallel iteration**: During iterative refinement, both variables go through the same number of iterations, but may have different numbers of control points
-
-3. **Minimal structural change**: The implementation leverages the existing optimization framework, simply extending the parameter vector dimension
-
-4. **Backward compatibility**: Configurations can specify constant s(t) to reproduce current behavior exactly
-
-### Expected Benefits
-
-- **More realistic optimization**: Savings rate is a key economic policy variable that should be optimized alongside other controls
-- **Richer dynamics**: Time-varying s(t) allows model to balance present vs. future Consumption optimally
-- **Methodological advancement**: Demonstrates framework extensibility to multi-dimensional control problems
-
 ## Project Structure
 
 ```
@@ -1915,6 +1702,19 @@ coin_equality/
 ├── coin_equality (methods) v0.1.pdf   # Detailed methods document
 └── [source code directories]
 ```
+
+## Potential Improvements
+
+### Quadrature Optimization for Pareto Distributions
+
+The current implementation uses Gauss-Legendre quadrature with uniform node spacing in the income rank F ∈ [0,1]. However, for Pareto-like income distributions where y(F) ~ (1-F)^(-α) with α ≈ 0.3-0.5, the income function changes rapidly near F=1, suggesting that accuracy could be improved by clustering quadrature points near the upper tail.
+
+**Suggested approaches:**
+1. **Power transformation**: Transform Gauss-Legendre nodes using F = ξ^p with p ≈ 2-3, which clusters points near F=1. Requires including Jacobian factor p*ξ^(p-1) in all integrals.
+2. **Graded mesh**: Use multiple Gauss-Legendre segments with more points in high-income regions (e.g., [0, 0.8], [0.8, 0.95], [0.95, 1.0]).
+3. **Increase quadrature order**: Simple baseline test - increase N_QUAD from current value to 64 or 128 points to assess whether current scheme has sufficient accuracy.
+
+This optimization should be implemented after core model bugs are resolved, as it primarily affects numerical accuracy rather than correctness.
 
 ## References
 

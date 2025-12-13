@@ -369,7 +369,10 @@ def write_results_csv(results, output_dir, run_name='', filename='results.csv'):
     ]
 
     # Add any remaining variables not in the ordered list
-    remaining_vars = sorted([k for k in results.keys() if k not in ordered_columns])
+    # Exclude 2D distribution arrays (those go in xlsx file) and quadrature info
+    exclude_from_csv = {'y_net_yi', 'climate_damage_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
+    remaining_vars = sorted([k for k in results.keys()
+                            if k not in ordered_columns and k not in exclude_from_csv])
     var_names = ordered_columns + remaining_vars
 
     # Define variable descriptions and units
@@ -406,6 +409,24 @@ def write_results_csv(results, output_dir, run_name='', filename='results.csv'):
         'Lambda': ('Abatement cost as fraction of damaged output', 'dimensionless'),
         'redistribution': ('Per-capita redistributable income', '$/person/yr'),
         'dEcum_dt': ('Rate of cumulative emissions change', 'tCO2/yr'),
+        'Fmin': ('Minimum income rank boundary', 'dimensionless'),
+        'Fmax': ('Maximum income rank boundary', 'dimensionless'),
+        'min_y_net': ('Net income at Fmin', '$/person/yr'),
+        'max_y_net': ('Net income at Fmax', '$/person/yr'),
+        'uniform_redistribution_amount': ('Uniform redistribution amount', '$/person/yr'),
+        'uniform_tax_rate': ('Uniform tax rate', 'dimensionless'),
+        'aggregate_utility': ('Aggregate utility from integration', 'dimensionless'),
+        'Omega_base': ('Base damage from temperature before income adjustment', 'dimensionless'),
+        'y_damaged': ('Per-capita income after climate damage', '$/person/yr'),
+        'climate_damage': ('Per capita climate damage', '$/person/yr'),
+        'consumption': ('Per capita consumption', '$/person/yr'),
+        'savings': ('Per capita savings', '$/person/yr'),
+        'gini_consumption': ('Gini coefficient of consumption distribution', 'dimensionless'),
+        'gini_climate_damage': ('Gini coefficient of climate damage distribution', 'dimensionless'),
+        'gini_utility': ('Gini coefficient of utility distribution', 'dimensionless'),
+        'delta_gini_consumption': ('Change in Gini from input (consumption)', 'dimensionless'),
+        'delta_gini_climate_damage': ('Change in Gini from input (climate damage)', 'dimensionless'),
+        'delta_gini_utility': ('Change in Gini from input (utility)', 'dimensionless'),
     }
 
     # Create headers with format: "variable, description, (units)"
