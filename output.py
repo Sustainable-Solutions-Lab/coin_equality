@@ -426,7 +426,7 @@ def write_results_csv(results, output_dir, filename='results.csv'):
     return csv_path
 
 
-def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config_filename=None):
+def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config_filename=None, use_first_90_percent_for_ylim=False):
     """
     Create PDF with time series plots of all variables, organized by topic with combined charts.
 
@@ -442,6 +442,8 @@ def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config
         Name of PDF file
     config_filename : str, optional
         Name of configuration file to display on each page
+    use_first_90_percent_for_ylim : bool, optional
+        If True, calculate y-axis limits based on first 90% of time values (for full PDF)
 
     Returns
     -------
@@ -491,16 +493,16 @@ def plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config
                 charts_per_page = 6
                 for page_start in range(0, n_charts, charts_per_page):
                     page_charts = available_charts[page_start:page_start + charts_per_page]
-                    _create_plot_page_new(t, results, page_charts, group_name, run_name, pdf, page_start//charts_per_page + 1, config_filename=config_filename)
+                    _create_plot_page_new(t, results, page_charts, group_name, run_name, pdf, page_start//charts_per_page + 1, config_filename=config_filename, use_first_90_percent_for_ylim=use_first_90_percent_for_ylim)
                 continue
 
             # Create single page for this group
-            _create_plot_page_new(t, results, available_charts, group_name, run_name, pdf, layout=(rows, cols), figsize=figsize, config_filename=config_filename)
+            _create_plot_page_new(t, results, available_charts, group_name, run_name, pdf, layout=(rows, cols), figsize=figsize, config_filename=config_filename, use_first_90_percent_for_ylim=use_first_90_percent_for_ylim)
 
     return pdf_path
 
 
-def _create_plot_page_new(t, results, chart_specs, group_name, run_name, pdf, page_num=None, layout=None, figsize=None, config_filename=None):
+def _create_plot_page_new(t, results, chart_specs, group_name, run_name, pdf, page_num=None, layout=None, figsize=None, config_filename=None, use_first_90_percent_for_ylim=False):
     """
     Create a single page of plots for a variable group with support for combined charts.
 
@@ -526,6 +528,8 @@ def _create_plot_page_new(t, results, chart_specs, group_name, run_name, pdf, pa
         Figure size. If None, defaults to (15, 10)
     config_filename : str, optional
         Name of configuration file to display on page
+    use_first_90_percent_for_ylim : bool, optional
+        If True, calculate y-axis limits based on first 90% of time values
     """
     if layout is None:
         layout = (2, 3)
@@ -648,24 +652,40 @@ def _create_plot_page_new(t, results, chart_specs, group_name, run_name, pdf, pa
 
         # Skip log scale plots
         if not any(var in log_scale_vars for var in var_list):
-            # Check actual data range (not axis limits which may have matplotlib padding)
-            all_data = np.concatenate([results[var] for var in var_list])
+            # Determine which time indices to use for calculating y-axis limits
+            if use_first_90_percent_for_ylim:
+                # Use first 90% of time points for y-axis scaling
+                n_points = len(t)
+                n_points_for_ylim = int(0.9 * n_points)
+                all_data = np.concatenate([results[var][:n_points_for_ylim] for var in var_list])
+            else:
+                # Use all data points
+                all_data = np.concatenate([results[var] for var in var_list])
+
             data_min = np.min(all_data)
             data_max = np.max(all_data)
 
-            # Only apply if data doesn't cross zero (all positive or all negative)
+            # Add padding to the data range (5% on each side)
+            data_range = data_max - data_min
+            padding = 0.05 * data_range if data_range > 0 else 0.05 * abs(data_max)
+            ymin_default = data_min - padding
+            ymax_default = data_max + padding
+
+            # Apply zero-bound expansion if data doesn't cross zero
             if data_min * data_max > 0:  # Same sign
                 abs_data_min = abs(data_min)
                 abs_data_max = abs(data_max)
                 # If the smaller DATA bound is less than half the larger, replace it with zero
                 if min(abs_data_min, abs_data_max) < 0.5 * max(abs_data_min, abs_data_max):
-                    ymin, ymax = ax.get_ylim()
                     if abs_data_min < abs_data_max:
                         # Data starts closer to zero - set lower bound to zero
-                        ax.set_ylim(0, ymax)
+                        ymin_default = 0
                     else:
                         # Data ends closer to zero - set upper bound to zero
-                        ax.set_ylim(ymin, 0)
+                        ymax_default = 0
+
+            # Set the y-axis limits
+            ax.set_ylim(ymin_default, ymax_default)
 
     # Add config filename at bottom of page if provided
     if config_filename:
@@ -729,7 +749,7 @@ def save_results(results, run_name, plot_short_horizon=None, output_dir=None, co
         results_short = {key: val[mask] if isinstance(val, np.ndarray) else val
                         for key, val in results.items()}
 
-        pdf_file_full = plot_results_pdf(results, output_dir, run_name, filename='plots_full.pdf', config_filename=config_filename)
+        pdf_file_full = plot_results_pdf(results, output_dir, run_name, filename='plots_full.pdf', config_filename=config_filename, use_first_90_percent_for_ylim=True)
         pdf_file_short = plot_results_pdf(results_short, output_dir, run_name, filename='plots_short.pdf', config_filename=config_filename)
 
         output_dict['pdf_file'] = pdf_file_full

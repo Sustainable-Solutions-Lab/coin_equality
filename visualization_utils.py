@@ -243,6 +243,56 @@ def create_results_report_pdf(case_data, output_pdf):
                 axes[idx].axis('off')
 
             plt.tight_layout()
+
+            # Apply zero-bound expansion AFTER layout (to prevent being overridden)
+            log_scale_vars = {'y_net', 'K', 'Consumption', 'Savings', 'Y_gross', 'Y_net', 'A', 'redistribution', 'Redistribution_amount'}
+            for idx, (var_name, ylabel, title) in enumerate(page_vars):
+                ax_idx = idx + axes_offset
+                ax = axes[ax_idx]
+
+                # Skip if variable not available or uses log scale
+                if not any(var_name in df.columns for df in case_data.values()):
+                    continue
+                if var_name in log_scale_vars:
+                    continue
+
+                # Check actual data range using first 90% of time points for y-axis scaling
+                all_data = []
+                for df in case_data.values():
+                    if var_name in df.columns:
+                        # Use first 90% of time points to avoid late-time outliers
+                        n_points = len(df)
+                        n_points_for_ylim = int(0.9 * n_points)
+                        all_data.extend(df[var_name].values[:n_points_for_ylim])
+
+                if not all_data:
+                    continue
+
+                data_min = np.min(all_data)
+                data_max = np.max(all_data)
+
+                # Add padding to the data range (5% on each side)
+                data_range = data_max - data_min
+                padding = 0.05 * data_range if data_range > 0 else 0.05 * abs(data_max)
+                ymin_default = data_min - padding
+                ymax_default = data_max + padding
+
+                # Apply zero-bound expansion if data doesn't cross zero
+                if data_min * data_max > 0:  # Same sign
+                    abs_data_min = abs(data_min)
+                    abs_data_max = abs(data_max)
+                    # If the smaller DATA bound is less than half the larger, replace it with zero
+                    if min(abs_data_min, abs_data_max) < 0.5 * max(abs_data_min, abs_data_max):
+                        if abs_data_min < abs_data_max:
+                            # Data starts closer to zero - set lower bound to zero
+                            ymin_default = 0
+                        else:
+                            # Data ends closer to zero - set upper bound to zero
+                            ymax_default = 0
+
+                # Set the y-axis limits
+                ax.set_ylim(ymin_default, ymax_default)
+
             pdf.savefig(fig, orientation='landscape')
             plt.close(fig)
 
@@ -583,11 +633,14 @@ def create_results_report_pdf_to_existing(case_data, pdf):
             if var_name in log_scale_vars:
                 continue
 
-            # Check actual data range (not axis limits which may have matplotlib padding)
+            # Check actual data range using first 90% of time points for y-axis scaling
             all_data = []
             for df in case_data.values():
                 if var_name in df.columns:
-                    all_data.extend(df[var_name].values)
+                    # Use first 90% of time points to avoid late-time outliers
+                    n_points = len(df)
+                    n_points_for_ylim = int(0.9 * n_points)
+                    all_data.extend(df[var_name].values[:n_points_for_ylim])
 
             if not all_data:
                 continue
@@ -595,19 +648,27 @@ def create_results_report_pdf_to_existing(case_data, pdf):
             data_min = np.min(all_data)
             data_max = np.max(all_data)
 
-            # Only apply if data doesn't cross zero (all positive or all negative)
+            # Add padding to the data range (5% on each side)
+            data_range = data_max - data_min
+            padding = 0.05 * data_range if data_range > 0 else 0.05 * abs(data_max)
+            ymin_default = data_min - padding
+            ymax_default = data_max + padding
+
+            # Apply zero-bound expansion if data doesn't cross zero
             if data_min * data_max > 0:  # Same sign
                 abs_data_min = abs(data_min)
                 abs_data_max = abs(data_max)
                 # If the smaller DATA bound is less than half the larger, replace it with zero
                 if min(abs_data_min, abs_data_max) < 0.5 * max(abs_data_min, abs_data_max):
-                    ymin, ymax = ax.get_ylim()
                     if abs_data_min < abs_data_max:
                         # Data starts closer to zero - set lower bound to zero
-                        ax.set_ylim(0, ymax)
+                        ymin_default = 0
                     else:
                         # Data ends closer to zero - set upper bound to zero
-                        ax.set_ylim(ymin, 0)
+                        ymax_default = 0
+
+            # Set the y-axis limits
+            ax.set_ylim(ymin_default, ymax_default)
 
         pdf.savefig(fig, orientation='landscape')
         plt.close(fig)

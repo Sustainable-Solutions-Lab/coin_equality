@@ -107,7 +107,7 @@ def print_timing_stats():
     print(f"{'='*80}\n")
 
 
-def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
+def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -139,7 +139,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         - 'Gini_restore': Rate of restoration to gini (yr^-1)
         - 'fract_gdp': Fraction of GDP available for redistribution and abatement
         - 'f': Fraction allocated to abatement vs redistribution
-    climate_damage_yi_L_prev : np.ndarray
+    Climate_damage_yi_prev : np.ndarray
         Total climate damage (in dollars) at quadrature points from previous timestep (length N_QUAD).
         Units: $ at each rank F. Divided by current L to get per-capita damage.
         Money-conserving: total damage preserved despite population changes.
@@ -261,12 +261,8 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
 
     climate_damage = Omega_prev * y_gross # per capita climate damage
 
-    # Scale climate_damage_yi_prev so its sum matches current aggregate climate_damage
-    sum_climate_damage_yi_prev = np.sum(Fwi * climate_damage_yi_prev)
-    if sum_climate_damage_yi_prev > EPSILON:
-        climate_damage_yi_prev_scaled = climate_damage_yi_prev * climate_damage / sum_climate_damage_yi_prev
-    else:
-        climate_damage_yi_prev_scaled = climate_damage_yi_prev
+    # Convert total climate damage from previous timestep to per-capita
+    climate_damage_yi_prev_scaled = Climate_damage_yi_prev / L
 
     # Eq 2.2: Temperature change from cumulative emissions
     delta_T = k_climate * Ecum
@@ -309,6 +305,19 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         tax_amount = abateCost_amount + redistribution_amount # per capita
         # tax amount can be less than amount available if redistribution is turned off.
 
+        # Calculate Lambda early (needed for tax base calculations)
+        AbateCost = abateCost_amount * L  # total abatement cost
+        # Eq 1.7: Abatement cost as fraction of damaged production
+        # If Y_damaged is 0 (catastrophic climate damage), set Lambda = 1 (not in optimal state)
+        if Y_damaged == 0:
+            Lambda = 1.0
+        else:
+            Lambda = AbateCost / Y_damaged
+
+        # Eq 1.8 & 1.9: Net production after abatement cost
+        Y_net = Y_damaged - AbateCost  # Total net production
+        y_net = y_damaged - abateCost_amount  # Per capita net income
+
         # Find uniform redistribution amount
         if income_redistribution and income_dependent_redistribution_policy:
             # No uniform distribution
@@ -321,19 +330,8 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
         if income_dependent_tax_policy:
             tax_amount = abateCost_amount + redistribution_amount
         else:
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega_prev))
-            Fmax = 1.0                # Eq 1.3: Production after climate damage
-
-        AbateCost = abateCost_amount * L  # total abatement cost
-        # Eq 1.7: Abatement cost as fraction of damaged production
-        # If Y_damaged is 0 (catastrophic climate damage), set Lambda = 1 (not in optimal state)
-        if Y_damaged == 0:
-            Lambda = 1.0
-        else:
-            Lambda = AbateCost / Y_damaged  
-
-        Y_net = Y_damaged - AbateCost # Eq 1.8: Net production after abatement cost
-        y_net = y_damaged - abateCost_amount  # Eq 1.9: per capita income after abatement cost
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
+            Fmax = 1.0
 
         # Eq 2.1: Potential emissions (unabated)
         Epot = sigma * Y_gross
@@ -367,14 +365,14 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
 
             t_before_fmax = time.time()
             Fmax = find_Fmax_analytical(
-                Fmin, y_gross, gini, climate_damage_yi_prev_scaled, Fi_edges,
+                Fmin, y_gross * (1.0 - Lambda), gini, climate_damage_yi_prev_scaled, Fi_edges,
                 uniform_redistribution_amount, target_tax=tax_amount,
                 initial_guess=Fmax_prev,
             )
             _timing_stats['find_Fmax_time'] += time.time() - t_before_fmax
         else:
             # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / (y_gross * (1 - Omega_prev))
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
             Fmax = 1.0
 
         # Find Fmin using current Omega_base
@@ -383,7 +381,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             uniform_redistribution_amount = 0.0
             t_before_fmin = time.time()
             Fmin = find_Fmin_analytical(
-                y_gross, gini, climate_damage_yi_prev_scaled, Fi_edges,
+                y_gross * (1.0 - Lambda), gini, climate_damage_yi_prev_scaled, Fi_edges,
                 0.0, target_subsidy=redistribution_amount,
                 initial_guess=Fmin_prev,
             )
@@ -543,7 +541,7 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
             if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
                 climate_damage_yi = climate_damage_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
 
-        Omega = np.sum(Fwi * climate_damage_yi) / y_gross  # Recalculate Omega based on current damage distribution
+        Omega = np.sum(Fwi * climate_damage_yi) / (y_gross * (1.0 - Lambda))  # Recalculate Omega based on current damage distribution (relative to production after abatement)
 
     #========================================================================================
 
@@ -655,8 +653,8 @@ def calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, 
     })
 
     # Always return climate damage distribution for use in next time step
-    results['climate_damage_yi'] = climate_damage_yi  # Store total climate damage ($/population) for next timestep
-    results['Omega'] = Omega  # Store total climate damage ($/population) for next timestep
+    results['Climate_damage_yi'] = climate_damage_yi * L  # Store total climate damage ($) at quadrature points for next timestep
+    results['Omega'] = Omega  # Store aggregate climate damage fraction for next timestep
 
     t_end = time.time()
     _timing_stats['total_time'] += t_end - t_start
@@ -725,7 +723,7 @@ def integrate_model(config, store_detailed_output=True):
     xi_edges = np.concatenate(([-1.0], -1.0 + np.cumsum(wi)))  # length n_quad + 1
 
     # Initialize climate damage and Omega from previous timestep for first timestep
-    climate_damage_yi_prev = np.zeros(n_quad)
+    Climate_damage_yi_prev = np.zeros(n_quad)  # Total damage ($) at quadrature points
     Omega_prev = 0.0
 
     # Initialize Fmax and Fmin from previous timestep (None for first timestep)
@@ -817,9 +815,9 @@ def integrate_model(config, store_detailed_output=True):
         params = evaluate_params_at_time(t, config)
 
         # Calculate all variables and tendencies at current time
-        # Pass climate_damage_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
+        # Pass Climate_damage_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
         # Pass Fmax_prev and Fmin_prev to speed up root finding
-        outputs = calculate_tendencies(state, params, climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
+        outputs = calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -883,7 +881,7 @@ def integrate_model(config, store_detailed_output=True):
             state['Ecum'] = max(0.0, state['Ecum'] + dt * outputs['dEcum_dt'])
 
             # Update climate damage and Omega for next time step (lagged damage approach)
-            climate_damage_yi_prev = outputs['climate_damage_yi']
+            Climate_damage_yi_prev = outputs['Climate_damage_yi']
             Omega_prev = outputs['Omega']
 
             # Update Fmax and Fmin for next time step (speeds up root finding)

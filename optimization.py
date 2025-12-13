@@ -1272,7 +1272,10 @@ class UtilityOptimizer:
                 iteration_max_evaluations = round(1 + (max_evaluations_initial - 1) * refinement_base_evaluations**(iteration - 1))
 
             # Calculate f control points
-            n_points_f = round(1 + (n_points_initial - 1) * refinement_base_f**(iteration - 1))
+            if n_iterations == 1:
+                n_points_f = n_points_final if n_points_final is not None else n_points_initial
+            else:
+                n_points_f = round(1 + (n_points_initial - 1) * refinement_base_f**(iteration - 1))
             f_control_times, f_effective_scaling = calculate_chebyshev_times(
                 n_points_f,
                 self.base_config.integration_params.t_start,
@@ -1293,7 +1296,10 @@ class UtilityOptimizer:
             # Calculate s control points (if optimizing both f and s)
             s_effective_scaling = None
             if optimize_f_and_s:
-                n_points_s = round(1 + (n_points_initial_s - 1) * refinement_base_s**(iteration - 1))
+                if n_iterations == 1:
+                    n_points_s = n_points_final_s if n_points_final_s is not None else n_points_initial_s
+                else:
+                    n_points_s = round(1 + (n_points_initial_s - 1) * refinement_base_s**(iteration - 1))
                 s_control_times, s_effective_scaling = calculate_chebyshev_times(
                     n_points_s,
                     self.base_config.integration_params.t_start,

@@ -233,10 +233,32 @@ def main():
     print(f"Successfully generated {len(generated_files)} configuration files!")
     print(f"{'=' * 80}\n")
 
+    # Generate the correct pattern for run_parallel.py based on input filename
+    input_path = Path(input_config)
+    stem = input_path.stem  # filename without .json
+    parts = stem.split('_')
+
+    # Find and replace the switch pattern part with wildcards
+    pattern_found = False
+    for i in range(len(parts) - 1, -1, -1):
+        part = parts[i]
+        # Check if this part looks like a switch pattern (has t or f and hyphens)
+        if any(c in part for c in ['t', 'f']) and '-' in part and len(part.replace('-', '')) >= 3:
+            parts[i] = '*-*-*-*-*'
+            pattern_found = True
+            break
+
+    if not pattern_found:
+        # Fallback: assume format config_NAME_VERSION_PATTERN_...
+        if len(parts) >= 4:
+            parts[3] = '*-*-*-*-*'
+
+    pattern = '_'.join(parts) + '.json'
+
     print("Next step: Run all configs in parallel")
-    print('  python run_parallel.py "config_COIN-equality_004_*-*-*-*-*_0.02_fast10+t_1000.json"')
+    print(f'  python run_parallel.py "{pattern}"')
     print("\nOr run with reduced evaluations for testing:")
-    print('  python run_parallel.py "config_COIN-equality_004_*-*-*-*-*_0.02_fast10+t_1000.json" --optimization_parameters.max_evaluations 100')
+    print(f'  python run_parallel.py "{pattern}" --optimization_parameters.max_evaluations 100')
 
 
 if __name__ == '__main__':
