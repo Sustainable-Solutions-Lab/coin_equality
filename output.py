@@ -858,29 +858,34 @@ def save_results(results, run_name, plot_short_horizon=None, output_dir=None, co
         'xlsx_file': xlsx_file,
     }
 
+    # Exclude quadrature arrays and distribution data from plots (these are in XLSX only)
+    exclude_from_plots = {'y_net_yi', 'climate_damage_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
+    results_for_plots = {k: v for k, v in results.items() if k not in exclude_from_plots}
+
     if plot_short_horizon is not None:
         t = results['t']
         mask = t <= plot_short_horizon
+        n_time = len(t)
 
         results_short = {}
-        for key, val in results.items():
+        for key, val in results_for_plots.items():
             if isinstance(val, np.ndarray):
-                if val.ndim == 1:
+                if val.ndim == 1 and len(val) == n_time:
                     results_short[key] = val[mask]
-                elif val.ndim == 2:
+                elif val.ndim == 2 and val.shape[0] == n_time:
                     results_short[key] = val[mask, :]
                 else:
                     results_short[key] = val
             else:
                 results_short[key] = val
 
-        pdf_file_full = plot_results_pdf(results, output_dir, run_name, filename='plots_full.pdf', config_filename=config_filename, use_first_90_percent_for_ylim=True)
+        pdf_file_full = plot_results_pdf(results_for_plots, output_dir, run_name, filename='plots_full.pdf', config_filename=config_filename, use_first_90_percent_for_ylim=True)
         pdf_file_short = plot_results_pdf(results_short, output_dir, run_name, filename='plots_short.pdf', config_filename=config_filename)
 
         output_dict['pdf_file'] = pdf_file_full
         output_dict['pdf_file_short'] = pdf_file_short
     else:
-        pdf_file = plot_results_pdf(results, output_dir, run_name, filename='plots.pdf', config_filename=config_filename)
+        pdf_file = plot_results_pdf(results_for_plots, output_dir, run_name, filename='plots.pdf', config_filename=config_filename)
         output_dict['pdf_file'] = pdf_file
 
     return output_dict
