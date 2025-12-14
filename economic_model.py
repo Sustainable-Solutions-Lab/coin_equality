@@ -280,6 +280,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         # Economy has collapsed - set all downstream variables to zero or appropriate values
         redistribution_amount = 0.0
         abateCost_amount = 0.0
+        tax_amount = 0.0
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
         Omega = 0.0
@@ -293,6 +294,8 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         E = 0.0
         dK_dt = -delta * K
         climate_damage_yi = np.zeros_like(xi)
+        y_net_yi = np.zeros_like(xi)
+        utility_yi = np.zeros_like(xi)
     else:
         # Economy exists - proceed with calculations
         
@@ -645,6 +648,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             'delta_T': delta_T,
             'Omega': Omega,
             'Omega_base': Omega_base,  # Base damage from temperature before income adjustment
+            'Omega_prev': Omega_prev,  # Damage from previous timestep (lagged)
             'Y_damaged': Y_damaged,
             'Y_net': Y_net,
             'y_net': y_net,
@@ -803,6 +807,7 @@ def integrate_model(config, store_detailed_output=True):
             'delta_T': np.zeros(n_steps),
             'Omega': np.zeros(n_steps),
             'Omega_base': np.zeros(n_steps),
+            'Omega_prev': np.zeros(n_steps),
             'Gini': np.zeros(n_steps),  # Total Gini (background + perturbation)
             'gini': np.zeros(n_steps),  # Background Gini
             'Y_damaged': np.zeros(n_steps),
@@ -895,6 +900,7 @@ def integrate_model(config, store_detailed_output=True):
             results['delta_T'][i] = outputs['delta_T']
             results['Omega'][i] = outputs['Omega']
             results['Omega_base'][i] = outputs['Omega_base']
+            results['Omega_prev'][i] = outputs['Omega_prev']
             results['Gini'][i] = outputs['Gini']  # Total Gini
             results['gini'][i] = outputs['gini']  # Background Gini
             results['Y_damaged'][i] = outputs['Y_damaged']

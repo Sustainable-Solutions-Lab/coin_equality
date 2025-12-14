@@ -44,5 +44,5 @@ Thumbs.db
 # Output directory
 data/output/
 
-# JSON configuration subdirectory
-json/
+# JSON older configurations
+json/older/
