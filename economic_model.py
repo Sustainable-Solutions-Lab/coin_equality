@@ -107,7 +107,7 @@ def print_timing_stats():
     print(f"{'='*80}\n")
 
 
-def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
+def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -139,10 +139,10 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         - 'Gini_restore': Rate of restoration to gini (yr^-1)
         - 'fract_gdp': Fraction of GDP available for redistribution and abatement
         - 'f': Fraction allocated to abatement vs redistribution
-    Climate_damage_yi_prev : np.ndarray
-        Total climate damage (in dollars) at quadrature points from previous timestep (length N_QUAD).
-        Units: $ at each rank F. Divided by current L to get per-capita damage.
-        Money-conserving: total damage preserved despite population changes.
+    Omega_yi_prev : np.ndarray
+        Climate damage fractions at quadrature points from previous timestep (length N_QUAD).
+        Units: dimensionless (damage at each rank F as fraction of aggregate y_damaged).
+        Scaled by current y_damaged to get per-capita damage in dollars.
         Used to compute current income distribution with lagged damage to avoid circular dependency.
     xi : np.ndarray
         Gauss-Legendre quadrature nodes on [-1, 1] (length N_QUAD)
@@ -162,7 +162,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     dict
         Dictionary containing:
         - Tendencies: 'dK_dt', 'dEcum_dt'
-        - Climate damage: 'Climate_damage_yi' (total damage in $ per unit F at quadrature points)
+        - Climate damage: 'Omega_yi' (damage fractions at quadrature points)
           for use in next time step's lagged damage calculation
         - All intermediate variables: Y_gross, delta_T, Omega, Y_net, y_net, redistribution,
           mu, Lambda, AbateCost, U, E
@@ -259,8 +259,9 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     y_damaged = y_gross * (1.0 - Omega_prev) # gross production per capita net of climate damage
     climate_damage = Omega_prev * y_gross # per capita climate damage
 
-    # Convert total climate damage from previous timestep to per-capita
-    climate_damage_yi_prev_scaled = Climate_damage_yi_prev / L
+    # Convert damage fractions from previous timestep to per-capita damage amounts
+    # Omega_yi_prev is damage as fraction of previous y_damaged, scale by current y_damaged
+    climate_damage_yi_prev_scaled = Omega_yi_prev * y_damaged
 
     # Eq 2.2: Temperature change from cumulative emissions
     delta_T = k_climate * Ecum
@@ -280,6 +281,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
         Omega = 0.0
+        Omega_yi = np.zeros_like(xi)
         lambda_abate = 0.0
         y_net = 0.0
         mu = 0.0
@@ -292,8 +294,8 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     else:
         # Economy exists - proceed with calculations
         
-        available_for_redistribution_and_abatement = fract_gdp * y_gross * (1.0 - min(Omega_prev,1.0))
-
+        available_for_redistribution_and_abatement = fract_gdp *  y_damaged 
+        
         if income_redistribution:
             redistribution_amount = (1 - f) * available_for_redistribution_and_abatement
         else:
@@ -569,6 +571,10 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
 
         Omega = np.sum(Fwi * climate_damage_yi) / y_net  # Recalculate Omega based on current damage distribution (relative to net income after abatement and previous damage)
 
+        # Calculate Omega_yi for next timestep (damage at each F as fraction of aggregate y_damaged)
+        # This makes the code internally consistent - passing ratios instead of mixed amounts and ratios
+        Omega_yi = climate_damage_yi / y_damaged
+
     #========================================================================================
 
 
@@ -681,6 +687,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             'delta_gini_utility': delta_gini_utility,  # Change in Gini from input (utility, 0 when eta >= 1)
             'y_net_yi': y_net_yi,  # Per capita net income distribution across quadrature points
             'climate_damage_yi': climate_damage_yi,  # Per capita climate damage distribution across quadrature points
+            'Omega_yi': Omega_yi,  # Climate damage fractions (dimensionless) at quadrature points
             'utility_yi': utility_yi,  # Utility distribution across quadrature points
         })
 
@@ -692,7 +699,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     })
 
     # Always return climate damage distribution for use in next time step
-    results['Climate_damage_yi'] = climate_damage_yi * L  # Store total climate damage ($) at quadrature points for next timestep
+    results['Omega_yi'] = Omega_yi  # Store damage fractions (dimensionless) at quadrature points for next timestep
     results['Omega'] = Omega  # Store aggregate climate damage fraction for next timestep
 
     t_end = time.time()
@@ -761,8 +768,8 @@ def integrate_model(config, store_detailed_output=True):
     # We want edges from -1 to +1, so: -1 + cumsum(wi) goes from -1+wi[0] to 1
     xi_edges = np.concatenate(([-1.0], -1.0 + np.cumsum(wi)))  # length n_quad + 1
 
-    # Initialize climate damage and Omega from previous timestep for first timestep
-    Climate_damage_yi_prev = np.zeros(n_quad)  # Total damage ($) at quadrature points
+    # Initialize climate damage fractions and Omega from previous timestep for first timestep
+    Omega_yi_prev = np.zeros(n_quad)  # Damage fractions (dimensionless) at quadrature points
     Omega_prev = 0.0
 
     # Initialize Fmax and Fmin from previous timestep (None for first timestep)
@@ -843,6 +850,7 @@ def integrate_model(config, store_detailed_output=True):
             'max_y_net': np.zeros(n_steps),
             'y_net_yi': np.zeros((n_steps, n_quad)),  # Per capita net income distribution
             'climate_damage_yi': np.zeros((n_steps, n_quad)),  # Per capita climate damage distribution
+            'Omega_yi': np.zeros((n_steps, n_quad)),  # Climate damage fractions (dimensionless) at quadrature points
             'utility_yi': np.zeros((n_steps, n_quad)),  # Utility distribution
         })
 
@@ -872,9 +880,9 @@ def integrate_model(config, store_detailed_output=True):
         params = evaluate_params_at_time(t, config)
 
         # Calculate all variables and tendencies at current time
-        # Pass Climate_damage_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
+        # Pass Omega_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
         # Pass Fmax_prev and Fmin_prev to speed up root finding
-        outputs = calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
+        outputs = calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -936,6 +944,7 @@ def integrate_model(config, store_detailed_output=True):
             results['max_y_net'][i] = outputs['max_y_net']
             results['y_net_yi'][i, :] = outputs['y_net_yi']
             results['climate_damage_yi'][i, :] = outputs['climate_damage_yi']
+            results['Omega_yi'][i, :] = outputs['Omega_yi']
             results['utility_yi'][i, :] = outputs['utility_yi']
 
         # Euler step: update state for next iteration (skip on last step)
@@ -944,8 +953,8 @@ def integrate_model(config, store_detailed_output=True):
             # do not allow cumulative emissions to go negative, making it colder than the initial condition
             state['Ecum'] = max(0.0, state['Ecum'] + dt * outputs['dEcum_dt'])
 
-            # Update climate damage and Omega for next time step (lagged damage approach)
-            Climate_damage_yi_prev = outputs['Climate_damage_yi']
+            # Update climate damage fractions and Omega for next time step (lagged damage approach)
+            Omega_yi_prev = outputs['Omega_yi']
             Omega_prev = outputs['Omega']
 
             # Update Fmax and Fmin for next time step (speeds up root finding)

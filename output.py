@@ -373,7 +373,7 @@ def write_results_csv(results, output_dir, run_name='', filename='results.csv'):
 
     # Add any remaining variables not in the ordered list
     # Exclude 2D distribution arrays (those go in xlsx file) and quadrature info
-    exclude_from_csv = {'y_net_yi', 'climate_damage_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
+    exclude_from_csv = {'y_net_yi', 'climate_damage_yi', 'Omega_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
     remaining_vars = sorted([k for k in results.keys()
                             if k not in ordered_columns and k not in exclude_from_csv])
     var_names = ordered_columns + remaining_vars
@@ -488,6 +488,7 @@ def write_distribution_xlsx(results, output_dir, run_name, filename='distributio
     - 'Quadrature_Info': xi, wi, xi_edges, Fi, Fwi, Fi_edges
     - 'y_net_yi': Per capita net income distribution over time
     - 'climate_damage_yi': Per capita climate damage distribution over time
+    - 'Omega_yi': Climate damage fractions (dimensionless) at quadrature points over time
     - 'utility_yi': Utility distribution over time
 
     Each distribution sheet has time in the first column and income bins in remaining columns.
@@ -531,7 +532,13 @@ def write_distribution_xlsx(results, output_dir, run_name, filename='distributio
         damage_df.insert(0, 't', t)
         damage_df.to_excel(writer, sheet_name='climate_damage_yi', index=False)
 
-        # Sheet 4: utility_yi (utility distribution)
+        # Sheet 4: Omega_yi (damage fractions at quadrature points)
+        if 'Omega_yi' in results:
+            omega_yi_df = pd.DataFrame(results['Omega_yi'], columns=bin_names)
+            omega_yi_df.insert(0, 't', t)
+            omega_yi_df.to_excel(writer, sheet_name='Omega_yi', index=False)
+
+        # Sheet 5: utility_yi (utility distribution)
         utility_df = pd.DataFrame(results['utility_yi'], columns=bin_names)
         utility_df.insert(0, 't', t)
         utility_df.to_excel(writer, sheet_name='utility_yi', index=False)
@@ -859,7 +866,7 @@ def save_results(results, run_name, plot_short_horizon=None, output_dir=None, co
     }
 
     # Exclude quadrature arrays and distribution data from plots (these are in XLSX only)
-    exclude_from_plots = {'y_net_yi', 'climate_damage_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
+    exclude_from_plots = {'y_net_yi', 'climate_damage_yi', 'Omega_yi', 'utility_yi', 'xi', 'wi', 'xi_edges', 'Fi', 'Fwi', 'Fi_edges'}
     results_for_plots = {k: v for k, v in results.items() if k not in exclude_from_plots}
 
     if plot_short_horizon is not None:
