@@ -249,18 +249,14 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     #========================================================================================
     # Main calculations
 
-    # Eq 1.1: Gross production (Cobb-Douglas)
+    # Eq 1.1: Gross production per capita (Cobb-Douglas)
     if K > 0 and L > 0:
-        Y_gross = A * (K ** alpha) * (L ** (1 - alpha))
-        y_gross = Y_gross / L
+        y_gross = A * ((K / L) ** alpha)
     else:
-        Y_gross = 0.0
         y_gross = 0.0
 
     # Use Omega from previous timestep for budgeting and damage calculations
-    Y_damaged = Y_gross * (1.0 - Omega_prev) # Gross production net of climate damage
     y_damaged = y_gross * (1.0 - Omega_prev) # gross production per capita net of climate damage
-
     climate_damage = Omega_prev * y_gross # per capita climate damage
 
     # Convert total climate damage from previous timestep to per-capita
@@ -284,14 +280,11 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         aggregate_utility = NEG_BIGNUM
         aggregate_damage_fraction = 0.0
         Omega = 0.0
-        Y_damaged = 0.0
-        Lambda = 0.0
-        AbateCost = 0.0
-        Y_net = 0.0
+        lambda_abate = 0.0
         y_net = 0.0
         mu = 0.0
         U = NEG_BIGNUM
-        E = 0.0
+        e = 0.0
         dK_dt = -delta * K
         climate_damage_yi = np.zeros_like(xi)
         y_net_yi = np.zeros_like(xi)
@@ -310,18 +303,15 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         tax_amount = abateCost_amount + redistribution_amount # per capita
         # tax amount can be less than amount available if redistribution is turned off.
 
-        # Calculate Lambda early (needed for tax base calculations)
-        AbateCost = abateCost_amount * L  # total abatement cost
-        # Eq 1.7: Abatement cost as fraction of damaged production
-        # If Y_damaged is 0 (catastrophic climate damage), set Lambda = 1 (not in optimal state)
-        if Y_damaged == 0:
-            Lambda = 1.0
+        # Eq 1.7: Abatement cost as fraction of damaged production (per capita)
+        # If y_damaged is 0 (catastrophic climate damage), set lambda_abate = 1 (not in optimal state)
+        if y_damaged == 0:
+            lambda_abate = 1.0
         else:
-            Lambda = AbateCost / Y_damaged
+            lambda_abate = abateCost_amount / y_damaged
 
-        # Eq 1.8 & 1.9: Net production after abatement cost
-        Y_net = Y_damaged - AbateCost  # Total net production
-        y_net = y_damaged - abateCost_amount  # Per capita net income
+        # Eq 1.8 & 1.9: Net production per capita after abatement cost
+        y_net = y_damaged - abateCost_amount
 
         # Find uniform redistribution amount
         if income_redistribution and income_dependent_redistribution_policy:
@@ -338,17 +328,17 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
             Fmax = 1.0
 
-        # Eq 2.1: Potential emissions (unabated)
-        Epot = sigma * Y_gross
+        # Eq 2.1: Potential emissions per capita (unabated)
+        epot = sigma * y_gross
 
         # Eq 1.6: Abatement fraction
-        if Epot > 0 and AbateCost > 0:
-            mu = min(mu_max, (AbateCost * theta2 / (Epot * theta1)) ** (1 / theta2))
+        if epot > 0 and abateCost_amount > 0:
+            mu = min(mu_max, (abateCost_amount * theta2 / (epot * theta1)) ** (1 / theta2))
         else:
             mu = 0.0
 
-        # Eq 2.3: Actual emissions (after abatement)
-        E = sigma * (1 - mu) * Y_gross
+        # Eq 2.3: Actual emissions per capita (after abatement)
+        e = sigma * (1 - mu) * y_gross
     
 
         #------------------------------------------------------
@@ -372,7 +362,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
 
                 t_before_fmax = time.time()
                 Fmax = find_Fmax_analytical(
-                    Fmin, y_gross * (1.0 - Lambda), gini, climate_damage_yi_prev_scaled, Fi_edges,
+                    Fmin, y_gross * (1.0 - lambda_abate), gini, climate_damage_yi_prev_scaled, Fi_edges,
                     uniform_redistribution_amount, target_tax=tax_amount,
                     initial_guess=Fmax_prev,
                 )
@@ -393,7 +383,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             if redistribution_amount > EPSILON:
                 t_before_fmin = time.time()
                 Fmin = find_Fmin_analytical(
-                    y_gross * (1.0 - Lambda), gini, climate_damage_yi_prev_scaled, Fi_edges,
+                    y_gross * (1.0 - lambda_abate), gini, climate_damage_yi_prev_scaled, Fi_edges,
                     0.0, target_subsidy=redistribution_amount,
                     initial_guess=Fmin_prev,
                 )
@@ -583,13 +573,13 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
 
 
         # Eq 1.10: Capital tendency
-        dK_dt = s * Y_net - delta * K
+        dK_dt = s * y_net * L - delta * K
 
         # aggregate utility
         U = aggregate_utility
 
     #========================================================================================
-        
+
     # Prepare output
     results = {}
 
@@ -597,8 +587,14 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
         # Additional calculated variables for detailed output only
         marginal_abatement_cost = theta1 * mu ** (theta2 - 1)  # Social cost of carbon
 
-        # Calculate gross and per capita variants for output
-        Climate_damage = Omega_prev * Y_gross  # Total climate damage
+        # Calculate total (upper-case) variables from per capita variables for recording output
+        Y_gross = y_gross * L  # Total gross production
+        Y_damaged = y_damaged * L  # Total damaged production
+        Y_net = y_net * L  # Total net production
+        AbateCost = abateCost_amount * L  # Total abatement cost
+        Lambda = lambda_abate  # Abatement cost fraction (same for total and per capita)
+        E = e * L  # Total emissions
+        Climate_damage = climate_damage * L  # Total climate damage
         Consumption = (1 - s) * Y_net  # Total consumption
         consumption = (1 - s) * y_net  # Per capita consumption
         Savings = s * Y_net  # Total savings
@@ -692,7 +688,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
     results.update({
         'U': U,
         'dK_dt': dK_dt,
-        'dEcum_dt': E,
+        'dEcum_dt': e * L,
     })
 
     # Always return climate damage distribution for use in next time step
