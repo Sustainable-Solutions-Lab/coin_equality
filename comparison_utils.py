@@ -50,8 +50,10 @@ def discover_result_directories(path_patterns):
         matches = glob.glob(pattern)
         for match in matches:
             path = Path(match)
-            if path.is_dir() and (path / 'optimization_summary.csv').exists():
-                directories.append(path)
+            if path.is_dir():
+                summary_files = list(path.glob('*_optimization_summary.csv'))
+                if summary_files:
+                    directories.append(path)
 
     if not directories:
         raise ValueError(f"No valid result directories found for patterns: {path_patterns}")
@@ -112,7 +114,10 @@ def load_optimization_summaries(directories):
     data = {}
     for directory in directories:
         case_name = generate_case_name(directory)
-        csv_path = directory / 'optimization_summary.csv'
+        summary_files = list(directory.glob('*_optimization_summary.csv'))
+        if not summary_files:
+            raise ValueError(f"No optimization_summary.csv file found in {directory}")
+        csv_path = summary_files[0]
 
         # Parse custom CSV format - find iteration history section
         with open(csv_path, 'r') as f:
@@ -189,7 +194,10 @@ def load_control_points(directories):
 
     for directory in directories:
         case_name = generate_case_name(directory)
-        csv_path = directory / 'optimization_summary.csv'
+        summary_files = list(directory.glob('*_optimization_summary.csv'))
+        if not summary_files:
+            raise ValueError(f"No optimization_summary.csv file found in {directory}")
+        csv_path = summary_files[0]
 
         with open(csv_path, 'r') as f:
             lines = f.readlines()

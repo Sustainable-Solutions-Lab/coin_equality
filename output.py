@@ -152,7 +152,7 @@ def copy_config_file(config_path, output_dir):
     return output_path
 
 
-def write_optimization_summary(opt_results, sensitivity_results, output_dir, filename='optimization_summary.csv'):
+def write_optimization_summary(opt_results, sensitivity_results, output_dir, run_name, filename='optimization_summary.csv'):
     """
     Write optimization summary statistics to CSV file.
 
@@ -164,6 +164,8 @@ def write_optimization_summary(opt_results, sensitivity_results, output_dir, fil
         Sensitivity analysis results (optional)
     output_dir : str
         Directory to write CSV file
+    run_name : str
+        Name of the model run to prepend to filename
     filename : str
         Name of CSV file
 
@@ -182,7 +184,7 @@ def write_optimization_summary(opt_results, sensitivity_results, output_dir, fil
     - Iteration-by-iteration results (for iterative refinement mode)
     - Sensitivity analysis statistics (if provided)
     """
-    csv_path = os.path.join(output_dir, filename)
+    csv_path = os.path.join(output_dir, f"{run_name}_{filename}")
 
     with open(csv_path, 'w', newline='') as f:
         writer = csv.writer(f)

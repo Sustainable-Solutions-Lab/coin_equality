@@ -574,7 +574,7 @@ def calculate_tendencies(state, params, Climate_damage_yi_prev, Omega_prev, xi, 
             if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
                 climate_damage_yi = climate_damage_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
 
-        Omega = np.sum(Fwi * climate_damage_yi) / (y_gross * (1.0 - Lambda))  # Recalculate Omega based on current damage distribution (relative to production after abatement)
+        Omega = np.sum(Fwi * climate_damage_yi) / (y_gross * (1.0 - Lambda) * (1.0 - Omega_prev))  # Recalculate Omega based on current damage distribution (relative to production after abatement and previous damage)
 
     #========================================================================================
 

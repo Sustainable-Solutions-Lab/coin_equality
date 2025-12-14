@@ -612,7 +612,7 @@ def main():
     print(f"  Comprehensive PDF: {comprehensive_pdf}")
 
     print("\nWriting optimization summary CSV...")
-    opt_csv_path = write_optimization_summary(opt_results, sensitivity_results, output_dir, 'optimization_summary.csv')
+    opt_csv_path = write_optimization_summary(opt_results, sensitivity_results, output_dir, config.run_name, 'optimization_summary.csv')
     print(f"  Optimization CSV: {opt_csv_path}")
 
     print("\nCopying configuration file...")
