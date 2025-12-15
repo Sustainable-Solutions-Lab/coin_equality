@@ -123,6 +123,41 @@ The differential equation solver uses climate damage from the previous timestep 
 22. **dK/dt** from s, Y_net, δ, K (Eq 1.10: capital tendency)
 23. **current_income_dist** with y_mean = y_net (for next time step's damage calculation)
 
+### General Calculational Strategy
+
+The economic model uses several key strategies to ensure computational efficiency and avoid circular dependencies when calculating quantities as functions of population rank F (sorted by income):
+
+**1. Lagged Damage Approach:**
+
+Climate damage and related quantities (taxes, redistribution, net income) depend on the income distribution, which itself depends on climate damage. To avoid iterative decision-making within each timestep, we use the `omega_yi` (income-dependent damage) from the previous timestep when calculating the current timestep's income distribution:
+
+- Current income distribution is calculated using previous timestep's `omega_yi`
+- This allows explicit (non-iterative) calculation of post-tax, post-redistribution, post-damage income
+- Current `omega_yi` is computed and saved for use in the next timestep
+- At t=0, `omega_yi` is initialized assuming no prior climate damage
+
+**2. Income for Climate Damage Calculations:**
+
+Climate damage distribution is calculated based on income after taxes, redistribution, and climate damage. The sequence is:
+
+1. Start with gross income `y_gross` (pre-damage, pre-tax)
+2. Apply previous timestep's climate damage to get income distribution
+3. Calculate taxes and redistribution based on this distribution
+4. Compute net income at each rank F
+5. Calculate current climate damage based on this net income distribution
+6. Save current damage for use in next timestep
+
+**3. Climate Damage on Abatement Expenditure:**
+
+Abatement costs reduce production available for consumption and investment. The climate damage applied to abatement expenditure equals the mean (aggregate) climate damage `Omega`, regardless of who pays for the abatement:
+
+- `AbateCost = f · redistribution_amount · L · (1 - Omega)`
+- Mean climate damage `Omega` is applied uniformly to abatement
+- This ensures consistency with the aggregate production accounting
+- Individual income-dependent damage `omega_yi` affects consumption distribution but not aggregate abatement costs
+
+These strategies ensure the model has well-defined, explicit calculations at each timestep while maintaining consistency between individual-level (rank-dependent) and aggregate quantities.
+
 ### Core Components
 
 #### 1. Economic Model (Solow-Swann Growth)

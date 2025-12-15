@@ -354,7 +354,7 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
                 t_before_fmin = time.time()
                 Fmin = find_Fmin(
                     y_gross * (1.0 - lambda_abate), gini, Omega_prev, omega_yi_prev_scaled,
-                    redistribution_amount, 0.0, Fi_edges,
+                    redistribution_amount, 0.0, uniform_tax_rate, Fi_edges,
                     initial_guess=Fmin_prev,
                 )
                 _timing_stats['find_Fmin_time'] += time.time() - t_before_fmin

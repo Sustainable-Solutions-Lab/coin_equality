@@ -181,6 +181,8 @@ def find_Fmax(
     """
     Find Fmax in [Fmin, 1) such that progressive taxation yields target tax amount.
 
+    If we are here it is because there is income-dependent tax.
+
     Uses analytical Lorenz curve integration instead of numerical quadrature,
     with stepwise interpolation for climate damage.
 
@@ -225,8 +227,10 @@ def find_Fmax(
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
+
+    # Note, since we are in this routine uniform_tax_rate is zero.
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(y_gross * omega_yi * bin_widths)))
+    damage_cumulative = np.concatenate(([0.0], np.cumsum((y_gross + uniform_redistribution)  * omega_yi * bin_widths)))
     total_damage_integral = damage_cumulative[-1]
 
     def tax_revenue_minus_target(Fmax):
@@ -253,15 +257,19 @@ def find_Fmax(
             # Cumulative up to start of bin containing Fmax
             damage_integral_0_to_Fmax = damage_cumulative[bin_idx]
             # Add partial contribution from within the bin
-            partial_width = Fmax - Fi_edges[bin_idx]
-            damage_integral_0_to_Fmax += omega_yi[bin_idx] * partial_width
+            partial_width = (Fmax - Fi_edges[bin_idx]) / bin_widths[bin_idx]
+            damage_integral_0_to_Fmax += (damage_cumulative[bin_idx+1] - damage_cumulative[bin_idx]) * partial_width
 
         damage_integral = total_damage_integral - damage_integral_0_to_Fmax
+
+        # Damage at Fmax based on income at Fmax
+        damage_at_Fmax = (y_gross * L_pareto_derivative(Fmax, gini) + uniform_redistribution) * omega_at_Fmax
         damage_part = damage_integral - (1.0 - Fmax) * damage_at_Fmax
 
         # Tax revenue (uniform redistribution cancels out)
         tax_revenue = lorenz_part - damage_part
 
+        target_tax = abateCost_amount + redistribution_amount
         return tax_revenue - target_tax
 
     # Use secant method if we have a good initial guess, otherwise fall back to brentq
@@ -313,12 +321,16 @@ def find_Fmin(
     omega_yi,
     redistribution_amount,
     uniform_redistribution,
+    uniform_tax_rate,
     Fi_edges,
     tol=LOOSE_EPSILON,
     initial_guess=None,
 ):
     """
     Find Fmin in (0, 1) such that progressive redistribution yields target subsidy amount.
+
+    Note that this function is only used when there is income-dependent redistribution, which means that
+    the uniform redistribution term is zero.
 
     Uses analytical Lorenz curve integration instead of numerical quadrature,
     with stepwise interpolation for climate damage.
@@ -345,6 +357,8 @@ def find_Fmin(
         Per-capita redistribution amount (target subsidy).
     uniform_redistribution : float
         Uniform per-capita redistribution amount.
+    uniform_tax_rate : float
+        Uniform tax rate (fraction of income).
     Fi_edges : ndarray
         Interval boundaries for stepwise damage (length N+1).
     tol : float, optional
@@ -361,11 +375,14 @@ def find_Fmin(
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi * bin_widths)))
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi *( y_gross *  (1.0 - uniform_tax_rate) + uniform_redistribution) * bin_widths)))
 
     def subsidy_minus_target(Fmin):
+
+
         # Lorenz contribution from Pareto distribution
-        lorenz_part = y_gross * (
+        # difference if everyone ewere consuming at Fmin rate minus actural integrated to Fmin.
+        lorenz_part = y_gross * (1.0 - uniform_tax_rate) * (
             Fmin * L_pareto_derivative(Fmin, gini) - L_pareto(Fmin, gini)
         )
 
@@ -374,8 +391,8 @@ def find_Fmin(
         bin_idx = np.searchsorted(Fi_edges, Fmin, side='right') - 1
         bin_idx = np.clip(bin_idx, 0, len(omega_yi) - 1)
 
-        # Damage at Fmin is constant within bin (stepwise function)
-        damage_at_Fmin = omega_yi[bin_idx]
+        # Omega_yi at Fmin is constant within bin (stepwise function)
+        damage_at_Fmin = y_gross * (1.0 - uniform_tax_rate) * L_pareto_derivative(Fmin, gini) * omega_yi[bin_idx]
 
         # Integral from 0 to Fmin = cumulative up to bin start + partial bin
         if Fmin <= Fi_edges[0]:
@@ -386,8 +403,8 @@ def find_Fmin(
             # Cumulative up to start of bin containing Fmin
             damage_integral = damage_cumulative[bin_idx]
             # Add partial contribution from within the bin
-            partial_width = Fmin - Fi_edges[bin_idx]
-            damage_integral += omega_yi[bin_idx] * partial_width
+            partial_width = (Fmin - Fi_edges[bin_idx]) / bin_widths[bin_idx]
+            damage_integral += (damage_cumulative[bin_idx+1] - damage_cumulative[bin_idx]) * partial_width
 
         damage_part = Fmin * damage_at_Fmin - damage_integral
 
