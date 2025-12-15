@@ -76,8 +76,8 @@ The differential equation solver uses climate damage from the previous timestep 
 
 **Setup and Previous Damage:**
 1. **Fwi** = wi / 2.0 (transform quadrature weights from xi-space [-1,1] to F-space [0,1])
-2. **Climate_Damage_prev** from previous timestep's Climate_Damage_yi using Fwi-weighted sum
-3. **climate_damage_yi_prev** = Climate_Damage_prev / L (per-capita damage at each quadrature point)
+2. **Omega_prev** from previous timestep's aggregate climate damage fraction
+3. **Omega_yi_prev** = damage fractions at quadrature points from previous timestep
 
 **Current Timestep Production:**
 4. **Y_gross** from K, L, A, α (Eq 1.1: Cobb-Douglas production)
@@ -100,14 +100,14 @@ The differential equation solver uses climate damage from the previous timestep 
 13. **Segment 1 [0, Fmin]**: Low-income earners receiving redistribution
    - Set y_net_yi for bins below/containing Fmin with proper weighting
    - Calculate aggregate_utility using crra_utility_interval()
-   - Calculate climate_damage_yi for next timestep
+   - Calculate Omega_yi for next timestep
 14. **Segment 3 [Fmax, 1]**: High-income earners paying progressive tax
    - Set y_net_yi for bins above/containing Fmax with proper weighting
    - Calculate aggregate_utility using crra_utility_interval()
-   - Calculate climate_damage_yi for next timestep
+   - Calculate Omega_yi for next timestep
 15. **Segment 2 [Fmin, Fmax]**: Middle-income earners with uniform tax/redistribution
    - Calculate y_vals_Fi at quadrature points using y_of_F_after_damage()
-   - Set y_net_yi and climate_damage_yi for bins in/overlapping [Fmin, Fmax]
+   - Set y_net_yi and Omega_yi for bins in/overlapping [Fmin, Fmax]
    - Calculate aggregate_utility using Gauss-Legendre quadrature
 
 **Downstream Calculations:**
@@ -1305,7 +1305,7 @@ The results dictionary contains arrays for:
 - **Aggregate integrals**: `aggregate_utility`
 - **Investment/Consumption**: `Savings`, `savings`, `Consumption`, `consumption`
 - **Inequality/utility**: `Gini`, `G_eff`, `Gini_climate`, `U`, `discounted_utility`
-- **Distribution diagnostics**: `gini_consumption`, `gini_climate_damage`, `gini_utility`, `delta_gini_consumption`, `delta_gini_climate_damage`, `delta_gini_utility`
+- **Distribution diagnostics**: `gini_consumption`, `gini_utility`, `delta_gini_consumption`, `delta_gini_utility`
 - **Tendencies**: `dK_dt`, `dEcum_dt`, `d_delta_Gini_dt`, `delta_Gini_step_change`
 
 **Variables from lagged damage calculation:**
@@ -1320,13 +1320,11 @@ The results dictionary contains arrays for:
 
 **Distribution diagnostics (inequality measures calculated from discretized distributions):**
 - **gini_consumption**: Gini coefficient of consumption distribution
-- **gini_climate_damage**: Gini coefficient of climate damage distribution
 - **gini_utility**: Gini coefficient of utility distribution (0 when eta >= 1)
 - **delta_gini_consumption**: Difference from input Gini (gini_consumption - gini)
-- **delta_gini_climate_damage**: Difference from input Gini (gini_climate_damage - gini)
 - **delta_gini_utility**: Difference from input Gini (gini_utility - gini, 0 when eta >= 1)
 
-These diagnostics help track how redistribution and climate damage policies affect inequality across different variables. The Gini coefficients are computed from the discretized distributions at Gauss-Legendre quadrature points using the Lorenz curve integral: Gini = 2 ∫₀¹ (F - L(F)) dF. The utility Gini is only calculated when η < 1, since utility can have negative values when η ≥ 1.
+These diagnostics help track how redistribution and climate policies affect inequality across different variables. The Gini coefficients are computed from the discretized distributions at Gauss-Legendre quadrature points using the Lorenz curve integral: Gini = 2 ∫₀¹ (F - L(F)) dF. The utility Gini is only calculated when η < 1, since utility can have negative values when η ≥ 1.
 
 All arrays have the same length corresponding to time points from `t_start` to `t_end` in steps of `dt`.
 

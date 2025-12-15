@@ -623,10 +623,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             consumption_yi_full = y_net_yi * (1 - s)
 
             gini_consumption = gini_from_distribution(consumption_yi_full, Fi_edges, Fwi)
-            gini_climate_damage = gini_from_distribution(climate_damage_yi, Fi_edges, Fwi)
 
             delta_gini_consumption = gini_consumption - gini
-            delta_gini_climate_damage = gini_climate_damage - gini
 
             # Compute utility_yi from consumption_yi
             if eta == 1:
@@ -643,9 +641,7 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
                 delta_gini_utility = 0.0
         else:
             gini_consumption = 0.0
-            gini_climate_damage = 0.0
             delta_gini_consumption = 0.0
-            delta_gini_climate_damage = 0.0
             gini_utility = 0.0
             delta_gini_utility = 0.0
 
@@ -689,13 +685,10 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             'consumption': consumption,
             's': s,  # Savings rate (currently constant, may become time-dependent)
             'gini_consumption': gini_consumption,  # Gini coefficient of consumption distribution
-            'gini_climate_damage': gini_climate_damage,  # Gini coefficient of climate damage distribution
             'gini_utility': gini_utility,  # Gini coefficient of utility distribution (0 when eta >= 1)
             'delta_gini_consumption': delta_gini_consumption,  # Change in Gini from input (consumption)
-            'delta_gini_climate_damage': delta_gini_climate_damage,  # Change in Gini from input (climate damage)
             'delta_gini_utility': delta_gini_utility,  # Change in Gini from input (utility, 0 when eta >= 1)
             'y_net_yi': y_net_yi,  # Per capita net income distribution across quadrature points
-            'climate_damage_yi': climate_damage_yi,  # Per capita climate damage distribution across quadrature points
             'Omega_yi': Omega_yi,  # Climate damage fractions (dimensionless) at quadrature points
             'utility_yi': utility_yi,  # Utility distribution across quadrature points
         })
@@ -854,15 +847,12 @@ def integrate_model(config, store_detailed_output=True):
             'consumption': np.zeros(n_steps),
             's': np.zeros(n_steps),
             'gini_consumption': np.zeros(n_steps),
-            'gini_climate_damage': np.zeros(n_steps),
             'gini_utility': np.zeros(n_steps),
             'delta_gini_consumption': np.zeros(n_steps),
-            'delta_gini_climate_damage': np.zeros(n_steps),
             'delta_gini_utility': np.zeros(n_steps),
             'min_y_net': np.zeros(n_steps),
             'max_y_net': np.zeros(n_steps),
             'y_net_yi': np.zeros((n_steps, n_quad)),  # Per capita net income distribution
-            'climate_damage_yi': np.zeros((n_steps, n_quad)),  # Per capita climate damage distribution
             'Omega_yi': np.zeros((n_steps, n_quad)),  # Climate damage fractions (dimensionless) at quadrature points
             'utility_yi': np.zeros((n_steps, n_quad)),  # Utility distribution
         })
@@ -948,15 +938,12 @@ def integrate_model(config, store_detailed_output=True):
             results['consumption'][i] = outputs['consumption']
             results['s'][i] = outputs['s']
             results['gini_consumption'][i] = outputs['gini_consumption']
-            results['gini_climate_damage'][i] = outputs['gini_climate_damage']
             results['gini_utility'][i] = outputs['gini_utility']
             results['delta_gini_consumption'][i] = outputs['delta_gini_consumption']
-            results['delta_gini_climate_damage'][i] = outputs['delta_gini_climate_damage']
             results['delta_gini_utility'][i] = outputs['delta_gini_utility']
             results['min_y_net'][i] = outputs['min_y_net']
             results['max_y_net'][i] = outputs['max_y_net']
             results['y_net_yi'][i, :] = outputs['y_net_yi']
-            results['climate_damage_yi'][i, :] = outputs['climate_damage_yi']
             results['Omega_yi'][i, :] = outputs['Omega_yi']
             results['utility_yi'][i, :] = outputs['utility_yi']
 

@@ -187,10 +187,8 @@ def create_results_report_pdf(case_data, output_pdf):
         ('redistribution', 'Per-capita redistribution ($/person/yr)', 'Per-Capita Redistribution'),
         ('Redistribution_amount', 'Total redistribution ($/yr)', 'Total Redistribution'),
         ('gini_consumption', 'Gini coefficient', 'Gini Coefficient of Consumption'),
-        ('gini_climate_damage', 'Gini coefficient', 'Gini Coefficient of Climate Damage'),
         ('gini_utility', 'Gini coefficient', 'Gini Coefficient of Utility'),
         ('delta_gini_consumption', 'Change in Gini', 'Change in Gini (Consumption)'),
-        ('delta_gini_climate_damage', 'Change in Gini', 'Change in Gini (Climate Damage)'),
         ('delta_gini_utility', 'Change in Gini', 'Change in Gini (Utility)'),
 
         # Abatement Economics
@@ -566,10 +564,8 @@ def create_results_report_pdf_to_existing(case_data, pdf):
         ('redistribution', 'Per-capita redistribution ($/person/yr)', 'Per-Capita Redistribution'),
         ('Redistribution_amount', 'Total redistribution ($/yr)', 'Total Redistribution'),
         ('gini_consumption', 'Gini coefficient', 'Gini Coefficient of Consumption'),
-        ('gini_climate_damage', 'Gini coefficient', 'Gini Coefficient of Climate Damage'),
         ('gini_utility', 'Gini coefficient', 'Gini Coefficient of Utility'),
         ('delta_gini_consumption', 'Change in Gini', 'Change in Gini (Consumption)'),
-        ('delta_gini_climate_damage', 'Change in Gini', 'Change in Gini (Climate Damage)'),
         ('delta_gini_utility', 'Change in Gini', 'Change in Gini (Utility)'),
 
         # Abatement Economics
