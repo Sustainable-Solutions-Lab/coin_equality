@@ -5,13 +5,14 @@ This module implements the Solow-Swann growth model with climate damage
 and emissions abatement costs.
 """
 
+from ast import If
 import numpy as np
 import time
 from scipy.special import roots_legendre
 from distribution_utilities import (
     y_of_F_after_damage,
-    find_Fmax_analytical,
-    find_Fmin_analytical,
+    find_Fmax,
+    find_Fmin,
     L_pareto,
     L_pareto_derivative,
     crra_utility_interval,
@@ -107,7 +108,7 @@ def print_timing_stats():
     print(f"{'='*80}\n")
 
 
-def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
+def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -144,6 +145,10 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         Units: dimensionless (damage at each rank F as fraction of aggregate y_damaged).
         Scaled by current y_damaged to get per-capita damage in dollars.
         Used to compute current income distribution with lagged damage to avoid circular dependency.
+    Omega_prev : float
+        Aggregate climate damage fraction from previous timestep.
+    Omega_base_prev : float
+        Base climate damage from temperature at previous timestep (before income adjustment).
     xi : np.ndarray
         Gauss-Legendre quadrature nodes on [-1, 1] (length N_QUAD)
     xi_edges : np.ndarray
@@ -162,7 +167,7 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
     dict
         Dictionary containing:
         - Tendencies: 'dK_dt', 'dEcum_dt'
-        - Climate damage: 'Omega_yi' (damage fractions at quadrature points)
+        - Climate damage: 'Omega_yi' (damage fractions at quadrature points), 'Omega_base' (base damage)
           for use in next time step's lagged damage calculation
         - All intermediate variables: Y_gross, delta_T, Omega, Y_net, y_net, redistribution,
           mu, Lambda, AbateCost, U, E
@@ -259,9 +264,6 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
     y_damaged = y_gross * (1.0 - Omega_prev) # gross production per capita net of climate damage
     climate_damage = Omega_prev * y_gross # per capita climate damage
 
-    # Convert damage fractions from previous timestep to per-capita damage amounts
-    # Omega_yi_prev is damage as fraction of previous y_damaged, scale by current y_damaged
-    climate_damage_yi_prev_scaled = Omega_yi_prev * y_damaged
 
     # Eq 2.2: Temperature change from cumulative emissions
     delta_T = k_climate * Ecum
@@ -269,11 +271,23 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
     # Base damage from temperature (capped just below 1.0 to avoid division by zero)
     # Be careful when used not to produce effective Omega values >= 1.0
     Omega_base = psi1 * delta_T + psi2 * (delta_T ** 2)
+    
+    # Convert damage fractions from previous timestep to per-capita damage amounts
+    # Omega_yi_prev is damage as fraction of previous y_damaged, scale by current y_damaged and new Omega_base.
+    if Omega_base_prev > EPSILON:
+        omega_yi_prev_scaled = Omega_yi_prev * (Omega_base/Omega_base_prev) 
+    else:
+        omega_yi_prev_scaled = np.zeros_like(Omega_yi_prev)
+
 
     t_setup = time.time()
     _timing_stats['setup_time'] += t_setup - t_start
 
-    if y_gross <= EPSILON:
+    # -----------------------------------------------------------------------------------------
+    #  Do redistribution, taxes, utility, etcc
+    # -----------------------------------------------------------------------------------------
+
+    if y_gross <= EPSILON or y_damaged <= EPSILON:
         # Economy has collapsed - set all downstream variables to zero or appropriate values
         redistribution_amount = 0.0
         abateCost_amount = 0.0
@@ -288,7 +302,7 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         U = NEG_BIGNUM
         e = 0.0
         dK_dt = -delta * K
-        climate_damage_yi = np.zeros_like(xi)
+        Omega_yi = np.zeros_like(xi)
         y_net_yi = np.zeros_like(xi)
         utility_yi = np.zeros_like(xi)
     else:
@@ -302,18 +316,13 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             redistribution_amount = 0.0
 
         abateCost_amount = f * available_for_redistribution_and_abatement # per capita
+        lambda_abate = abateCost_amount / y_damaged # fraction of damaged production
+
         tax_amount = abateCost_amount + redistribution_amount # per capita
         # tax amount can be less than amount available if redistribution is turned off.
 
-        # Eq 1.7: Abatement cost as fraction of damaged production (per capita)
-        # If y_damaged is 0 (catastrophic climate damage), set lambda_abate = 1 (not in optimal state)
-        if y_damaged == 0:
-            lambda_abate = 1.0
-        else:
-            lambda_abate = abateCost_amount / y_damaged
-
-        # Eq 1.8 & 1.9: Net production per capita after abatement cost
-        y_net = y_damaged - abateCost_amount
+        # Eq 1.8 & 1.9: Net production per capita after abatement cost and climate damage
+        y_net = (1.0 - lambda_abate) * y_damaged 
 
         # Find uniform redistribution amount
         if income_redistribution and income_dependent_redistribution_policy:
@@ -327,55 +336,14 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         if income_dependent_tax_policy:
             tax_amount = abateCost_amount + redistribution_amount
         else:
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged
             Fmax = 1.0
-
-        # Eq 2.1: Potential emissions per capita (unabated)
-        epot = sigma * y_gross
-
-        # Eq 1.6: Abatement fraction
-        if epot > 0 and abateCost_amount > 0:
-            mu = min(mu_max, (abateCost_amount * theta2 / (epot * theta1)) ** (1 / theta2))
-        else:
-            mu = 0.0
-
-        # Eq 2.3: Actual emissions per capita (after abatement)
-        e = sigma * (1 - mu) * y_gross
-    
 
         #------------------------------------------------------
         # Now we are going to do the income dependent part of the code
         # To simplify we are going to shift the calculation to discrete intervals of population
         # governed by the Gaussian Laegendre nodes and weights, xi and wi
     
-
-        # For income-dependent tax, find Fmax such that tax matches target
-        if income_dependent_tax_policy:
-            uniform_tax_rate = 0.0
-            # Only find Fmax if there's actually something to tax
-            if tax_amount > EPSILON:
-                # We want to find the value of Fmax such that if everyone above Fmax made
-                # the same amount of money as people at Fmax, that would generate the right amount of tax revenue.
-                # The piece of resources that would come from the Lorenz curve above Fmax is:
-                # lorenz_part = y_gross *( (1 - L(Fmax)) - (1.0 - Fmax) * (d L/dF)@Fmax )
-                # damage_part = stepwise_integrate(Fmax, 1.0, climate_damage_yi_prev, Fi_edges) - (1 - Fmax) * stepwise_interpolate(Fmax, climate_damage_yi_prev, Fi_edges)
-                # The challenge is to find Fmax such that:
-                # tax_amount = lorenz_part - damage_part
-
-                t_before_fmax = time.time()
-                Fmax = find_Fmax_analytical(
-                    Fmin, y_gross * (1.0 - lambda_abate), gini, climate_damage_yi_prev_scaled, Fi_edges,
-                    uniform_redistribution_amount, target_tax=tax_amount,
-                    initial_guess=Fmax_prev,
-                )
-                _timing_stats['find_Fmax_time'] += time.time() - t_before_fmax
-            else:
-                # No tax amount, so no income-dependent taxation
-                Fmax = 1.0
-        else:
-            # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
-            Fmax = 1.0
 
         # Find Fmin using current Omega_base
         # For income-dependent redistribution, find Fmin such that redistribution matches target
@@ -384,9 +352,9 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             # Only find Fmin if there's actually something to redistribute
             if redistribution_amount > EPSILON:
                 t_before_fmin = time.time()
-                Fmin = find_Fmin_analytical(
-                    y_gross * (1.0 - lambda_abate), gini, climate_damage_yi_prev_scaled, Fi_edges,
-                    0.0, target_subsidy=redistribution_amount,
+                Fmin = find_Fmin(
+                    y_gross * (1.0 - lambda_abate), gini, Omega_prev, omega_yi_prev_scaled,
+                    redistribution_amount, 0.0, Fi_edges,
                     initial_guess=Fmin_prev,
                 )
                 _timing_stats['find_Fmin_time'] += time.time() - t_before_fmin
@@ -398,7 +366,37 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             uniform_redistribution_amount = redistribution_amount
             Fmin = 0.0
 
-    
+ 
+        # For income-dependent tax, find Fmax such that tax matches target
+        if income_dependent_tax_policy:
+            uniform_tax_rate = 0.0
+            # Only find Fmax if there's actually something to tax
+            if tax_amount > EPSILON:
+                # We want to find the value of Fmax such that if everyone above Fmax made
+                # the same amount of money as people at Fmax, that would generate the right amount of tax revenue.
+                # The piece of resources that would come from the Lorenz curve above Fmax is:
+                # lorenz_part = y_gross *( (1 - L(Fmax)) - (1.0 - Fmax) * (d L/dF)@Fmax )
+                # damage_part = stepwise_integrate(Fmax, 1.0, omega_yi_prev, Fi_edges) - (1 - Fmax) * stepwise_interpolate(Fmax, omega_yi_prev, Fi_edges)
+                # The challenge is to find Fmax such that:
+                # tax_amount = lorenz_part - damage_part
+
+                t_before_fmax = time.time()
+
+                # Find value of Fmax at which, if everyone F>Fmax would make same amount as people at Fmax, that would generate the target amount.
+                Fmax = find_Fmax(
+                    Fmin, y_gross, gini, Omega_prev, omega_yi_prev_scaled,
+                    redistribution_amount, uniform_redistribution_amount, abateCost_amount, Fi_edges,
+                    initial_guess=Fmax_prev,
+                )
+                _timing_stats['find_Fmax_time'] += time.time() - t_before_fmax
+            else:
+                # No tax amount, so no income-dependent taxation
+                Fmax = 1.0
+        else:
+            # Uniform tax
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
+            Fmax = 1.0
+   
         # Compute consumption, aggregate utility for the Fmin and Fmax region, and at each of the Gauss-Legendre quadrature nodes
         # Also calculate climate damage for next time step.
         # Divide calculation into three segments: [0, Fmin], [Fmin, Fmax], [Fmax, 1]
@@ -408,14 +406,14 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         y_net_yi = np.zeros_like(xi)
         consumption_yi = np.zeros_like(xi)
         utility_yi = np.zeros_like(xi)
-        climate_damage_yi = np.zeros_like(xi)
+        Omega_yi = np.zeros_like(xi)
         aggregate_utility = 0.0
 
         # Segment 1: Low-income earners receiving income-dependent redistribution [0, Fmin]
         t_before_seg1 = time.time()
         if Fmin > EPSILON:
-            climate_damage_amount_at_Fmin = stepwise_interpolate(Fmin, climate_damage_yi_prev_scaled, Fi_edges)
-            y_damaged_yi_min = y_gross * L_pareto_derivative(Fmin, gini) - climate_damage_amount_at_Fmin
+            omega_at_Fmin = stepwise_interpolate(Fmin, omega_yi_prev_scaled, Fi_edges)
+            y_damaged_yi_min = y_gross * L_pareto_derivative(Fmin, gini) - omega_at_Fmin
 
             # Set y_net_yi for bins below Fmin
             for i in range(len(Fi_edges) - 1):
@@ -429,8 +427,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
 
             min_y_net = y_of_F_after_damage(
                 Fmin, Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate),
-                uniform_redistribution_amount, climate_damage_amount_at_Fmin, gini,
+                y_gross, Omega_prev, omega_yi_prev_scaled, Fi_edges,
+                uniform_tax_rate, uniform_redistribution_amount, gini,
             )
             min_consumption = min_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
@@ -443,16 +441,16 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             else:
                 min_utility = (np.maximum(min_consumption, EPSILON) ** (1 - eta)) / (1 - eta)
 
-            # Set climate_damage_yi and utility_yi for bins below Fmin (same approach as y_net_yi)
+            # Set Omega_yi and utility_yi for bins below Fmin (same approach as y_net_yi)
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i+1] <= Fmin:
                     # Bin completely below Fmin
-                    climate_damage_yi[i] = climate_damage_min
+                    Omega_yi[i] = climate_damage_min
                     utility_yi[i] = min_utility
                 elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
                     # Bin containing Fmin - weight by fraction below Fmin
                     fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
-                    climate_damage_yi[i] = climate_damage_min * fraction_below
+                    Omega_yi[i] = climate_damage_min * fraction_below
                     utility_yi[i] = min_utility * fraction_below
 
         _timing_stats['segment1_time'] += time.time() - t_before_seg1
@@ -460,8 +458,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
         t_before_seg3 = time.time()
         if 1.0 - Fmax > EPSILON:
-            climate_damage_amount_at_Fmax = stepwise_interpolate(Fmax, climate_damage_yi_prev_scaled, Fi_edges)
-            y_damaged_yi_max = y_gross * L_pareto_derivative(Fmax, gini) - climate_damage_amount_at_Fmax
+            omega_at_Fmax = stepwise_interpolate(Fmax, omega_yi_prev_scaled, Fi_edges)
+            y_damaged_yi_max = y_gross * L_pareto_derivative(Fmax, gini) - omega_at_Fmax
 
             # Set y_net_yi for bins above Fmax
             for i in range(len(Fi_edges) - 1):
@@ -475,8 +473,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
 
             max_y_net = y_of_F_after_damage(
                 Fmax, Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate),
-                uniform_redistribution_amount, climate_damage_amount_at_Fmax, gini,
+                y_gross, Omega_prev, omega_yi_prev_scaled, Fi_edges,
+                uniform_tax_rate, uniform_redistribution_amount, gini,
             )
             max_consumption = max_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
@@ -489,16 +487,16 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             else:
                 max_utility = (np.maximum(max_consumption, EPSILON) ** (1 - eta)) / (1 - eta)
 
-            # Set climate_damage_yi and utility_yi for bins above Fmax (same approach as y_net_yi)
+            # Set Omega_yi and utility_yi for bins above Fmax (same approach as y_net_yi)
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i] >= Fmax:
                     # Bin completely above Fmax
-                    climate_damage_yi[i] = climate_damage_max
+                    Omega_yi[i] = climate_damage_max
                     utility_yi[i] = max_utility
                 elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
                     # Bin containing Fmax - weight by fraction above Fmax
                     fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
-                    climate_damage_yi[i] = climate_damage_max * fraction_above
+                    Omega_yi[i] = climate_damage_max * fraction_above
                     utility_yi[i] = max_utility * fraction_above
 
         _timing_stats['segment3_time'] += time.time() - t_before_seg3
@@ -509,19 +507,19 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             # Calculate y_net for each bin in the middle segment
             y_vals_Fi = y_of_F_after_damage(
                 Fi, Fmin, Fmax,
-                y_gross * (1 - uniform_tax_rate),
-                uniform_redistribution_amount, climate_damage_yi_prev_scaled, gini,
+                y_gross, Omega_prev, omega_yi_prev_scaled, Fi_edges,
+                uniform_tax_rate, uniform_redistribution_amount, gini,
             )
 
             # Calculate climate damage at quadrature points for next timestep
             if np.abs(y_damage_distribution_exponent) < EPSILON:
                 # Uniform damage
-                climate_damage_yi_mid = np.full_like(y_vals_Fi, Omega_base * y_vals_Fi)
+                omega_yi_mid = np.full_like(y_vals_Fi, Omega_base * y_vals_Fi)
             else:
                 # Income-dependent damage
-                climate_damage_yi_mid = Omega_base * y_vals_Fi * (y_vals_Fi / y_net_reference) ** (-y_damage_distribution_exponent)
+                omega_yi_mid = Omega_base * y_vals_Fi * (y_vals_Fi / y_net_reference) ** (-y_damage_distribution_exponent)
 
-            climate_damage_yi_mid = np.clip(climate_damage_yi_mid, 0.0, y_vals_Fi)
+            omega_yi_mid = np.clip(omega_yi_mid, 0.0, y_vals_Fi)
 
             # Calculate consumption and utility for middle segment
             consumption_vals = y_vals_Fi * (1 - s)
@@ -530,30 +528,30 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
             else:
                 utility_vals = (np.maximum(consumption_vals, EPSILON) ** (1 - eta)) / (1 - eta)
 
-            # Set y_net_yi, climate_damage_yi, and utility_yi for bins in [Fmin, Fmax]
+            # Set y_net_yi, Omega_yi, and utility_yi for bins in [Fmin, Fmax]
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i] >= Fmin and Fi_edges[i+1] <= Fmax:
                     # Bin completely within [Fmin, Fmax]
                     y_net_yi[i] = y_vals_Fi[i]
-                    climate_damage_yi[i] = climate_damage_yi_mid[i]
+                    Omega_yi[i] = omega_yi_mid[i]
                     utility_yi[i] = utility_vals[i]
                 elif Fi_edges[i] < Fmin <= Fi_edges[i+1] < Fmax:
                     # Bin contains Fmin - add weighted contribution for part above Fmin
                     fraction_above = (Fi_edges[i+1] - Fmin) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_above
-                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_above
+                    Omega_yi[i] += omega_yi_mid[i] * fraction_above
                     utility_yi[i] += utility_vals[i] * fraction_above
                 elif Fmin < Fi_edges[i] < Fmax <= Fi_edges[i+1]:
                     # Bin contains Fmax - add weighted contribution for part below Fmax
                     fraction_below = (Fmax - Fi_edges[i]) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_below
-                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_below
+                    Omega_yi[i] += omega_yi_mid[i] * fraction_below
                     utility_yi[i] += utility_vals[i] * fraction_below
                 elif Fi_edges[i] < Fmin and Fmax <= Fi_edges[i+1]:
                     # Bin contains both Fmin and Fmax - only the middle part
                     fraction_middle = (Fmax - Fmin) / Fwi[i]
                     y_net_yi[i] += y_vals_Fi[i] * fraction_middle
-                    climate_damage_yi[i] += climate_damage_yi_mid[i] * fraction_middle
+                    Omega_yi[i] += omega_yi_mid[i] * fraction_middle
                     utility_yi[i] += utility_vals[i] * fraction_middle
 
             # Gauss-Legendre quadrature over [Fmin, Fmax]: (Fmax-Fmin)/2 maps from [-1,1] to [Fmin,Fmax]
@@ -564,18 +562,33 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges,
         if not income_dependent_aggregate_damage and income_dependent_damage_distribution:
             # Only rescale if we have income-dependent distribution but want aggregate to match temperature-based damage
             # Rescale to match Omega_base * y_net (consistent with uniform distribution case)
-            total_climate_damage_pre_scale = np.sum(Fwi * climate_damage_yi)
+            total_climate_damage_pre_scale = np.sum(Fwi * Omega_yi)
             y_net_aggregate = np.sum(Fwi * y_net_yi)
             if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
-                climate_damage_yi = climate_damage_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
+                Omega_yi = Omega_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
 
-        Omega = np.sum(Fwi * climate_damage_yi) / y_net  # Recalculate Omega based on current damage distribution (relative to net income after abatement and previous damage)
+        Omega = np.sum(Fwi * Omega_yi) / y_net  # Recalculate Omega based on current damage distribution (relative to net income after abatement and previous damage)
 
         # Calculate Omega_yi for next timestep (damage at each F as fraction of aggregate y_damaged)
         # This makes the code internally consistent - passing ratios instead of mixed amounts and ratios
-        Omega_yi = climate_damage_yi / y_damaged
+        Omega_y = climate_damage_yi / y_damaged
 
     #========================================================================================
+    # mitigation carbon climate
+    
+        # Eq 2.1: Potential emissions per capita (unabated)
+        epot = sigma * y_gross
+
+        # Eq 1.6: Abatement fraction
+        if epot > 0 and abateCost_amount > 0:
+            mu = min(mu_max, (abateCost_amount * theta2 / (epot * theta1)) ** (1 / theta2))
+        else:
+            mu = 0.0
+
+        # Eq 2.3: Actual emissions per capita (after abatement)
+        e = sigma * (1 - mu) * y_gross
+    
+
 
 
         # Eq 1.10: Capital tendency
@@ -771,6 +784,7 @@ def integrate_model(config, store_detailed_output=True):
     # Initialize climate damage fractions and Omega from previous timestep for first timestep
     Omega_yi_prev = np.zeros(n_quad)  # Damage fractions (dimensionless) at quadrature points
     Omega_prev = 0.0
+    Omega_base_prev = 0.0
 
     # Initialize Fmax and Fmin from previous timestep (None for first timestep)
     Fmax_prev = None
@@ -882,7 +896,7 @@ def integrate_model(config, store_detailed_output=True):
         # Calculate all variables and tendencies at current time
         # Pass Omega_yi_prev and Omega_prev to use lagged damage (avoids circular dependency)
         # Pass Fmax_prev and Fmin_prev to speed up root finding
-        outputs = calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
+        outputs = calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -956,6 +970,7 @@ def integrate_model(config, store_detailed_output=True):
             # Update climate damage fractions and Omega for next time step (lagged damage approach)
             Omega_yi_prev = outputs['Omega_yi']
             Omega_prev = outputs['Omega']
+            Omega_base_prev = outputs['Omega_base']
 
             # Update Fmax and Fmin for next time step (speeds up root finding)
             Fmax_prev = outputs.get('Fmax')

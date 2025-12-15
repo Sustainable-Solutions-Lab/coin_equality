@@ -94,7 +94,11 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
 
         y(F) = y_mean_before_damage * dL/dF(F; gini) + uniform_redistribution - damage_prev_F
 
-    where the Lorenz curve is Pareto with Gini index gini:
+    where:
+        y_mean_before_damage = y_gross * (1 - uniform_tax_rate)
+        damage_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
+
+    and the Lorenz curve is Pareto with Gini index gini:
 
         L(F) = 1 - (1-F)^(1 - 1/a)
         a    = (1 + 1/gini)/2
@@ -108,10 +112,16 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
         Minimum population rank for clipping F to [Fmin, Fmax].
     Fmax : float
         Maximum population rank for clipping F to [Fmin, Fmax].
-    y_mean_before_damage : float
-        Mean income before damage.
-    damage_prev_F : float or array-like
-        Per-capita damage at rank F (must be same size as F or scalar).
+    y_gross : float
+        Gross income per capita.
+    Omega : float
+        Aggregate climate damage fraction.
+    omega_yi_prev : ndarray
+        Damage values at quadrature points from previous timestep.
+    Fi_edges : ndarray
+        Interval boundaries for stepwise damage interpolation.
+    uniform_tax_rate : float
+        Uniform tax rate.
     uniform_redistribution : float
         Additive constant redistribution amount.
     gini : float
@@ -134,6 +144,10 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
     if is_scalar:
         F = F.reshape(1)
 
+    # Compute y_mean_before_damage and damage_prev_F from the new parameters
+    y_mean_before_damage = y_gross * (1.0 - uniform_tax_rate)
+    damage_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
+
     # Pareto-Lorenz shape parameter from Gini
     a = (1.0 + 1.0 / gini) / 2.0
 
@@ -151,19 +165,21 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
 #========================================================================================
 
 
-def find_Fmax_analytical(
+def find_Fmax(
     Fmin,
     y_gross,
     gini,
-    damage_yi,
-    Fi_edges,
+    Omega,
+    omega_yi,
+    redistribution_amount,
     uniform_redistribution,
-    target_tax,
+    abateCost_amount,
+    Fi_edges,
     tol=LOOSE_EPSILON,
     initial_guess=None,
 ):
     """
-    Find Fmax in [Fmin, 1) such that progressive taxation yields target_tax.
+    Find Fmax in [Fmin, 1) such that progressive taxation yields target tax amount.
 
     Uses analytical Lorenz curve integration instead of numerical quadrature,
     with stepwise interpolation for climate damage.
@@ -184,14 +200,18 @@ def find_Fmax_analytical(
         Gross income per capita before damage.
     gini : float
         Gini coefficient.
-    damage_yi : ndarray
+    Omega : float
+        Aggregate climate damage fraction.
+    omega_yi : ndarray
         Damage values at quadrature points (length N).
-    Fi_edges : ndarray
-        Interval boundaries for stepwise damage (length N+1).
+    redistribution_amount : float
+        Per-capita redistribution amount.
     uniform_redistribution : float
         Uniform per-capita redistribution amount.
-    target_tax : float
-        Target tax amount to collect.
+    abateCost_amount : float
+        Per-capita abatement cost amount.
+    Fi_edges : ndarray
+        Interval boundaries for stepwise damage (length N+1).
     tol : float, optional
         Tolerance for root finding (default LOOSE_EPSILON).
     initial_guess : float, optional
@@ -200,12 +220,15 @@ def find_Fmax_analytical(
     Returns
     -------
     float
-        Fmax value such that progressive taxation yields target_tax.
+        Fmax value such that progressive taxation yields target tax amount.
     """
+    # Calculate target tax from components
+    target_tax = abateCost_amount + redistribution_amount
+
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_yi * bin_widths)))
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi * bin_widths)))
     total_damage_integral = damage_cumulative[-1]
 
     def tax_revenue_minus_target(Fmax):
@@ -218,10 +241,10 @@ def find_Fmax_analytical(
         # Fast damage calculation using pre-computed cumulative integrals
         # Find which bin Fmax is in
         bin_idx = np.searchsorted(Fi_edges, Fmax, side='right') - 1
-        bin_idx = np.clip(bin_idx, 0, len(damage_yi) - 1)
+        bin_idx = np.clip(bin_idx, 0, len(omega_yi) - 1)
 
         # Damage at Fmax is constant within bin (stepwise function)
-        damage_at_Fmax = damage_yi[bin_idx]
+        damage_at_Fmax = omega_yi[bin_idx]
 
         # Integral from Fmax to 1.0 = total - integral from 0 to Fmax
         if Fmax <= Fi_edges[0]:
@@ -233,7 +256,7 @@ def find_Fmax_analytical(
             damage_integral_0_to_Fmax = damage_cumulative[bin_idx]
             # Add partial contribution from within the bin
             partial_width = Fmax - Fi_edges[bin_idx]
-            damage_integral_0_to_Fmax += damage_yi[bin_idx] * partial_width
+            damage_integral_0_to_Fmax += omega_yi[bin_idx] * partial_width
 
         damage_integral = total_damage_integral - damage_integral_0_to_Fmax
         damage_part = damage_integral - (1.0 - Fmax) * damage_at_Fmax
@@ -285,18 +308,19 @@ def find_Fmax_analytical(
     return sol.root
 
 
-def find_Fmin_analytical(
+def find_Fmin(
     y_gross,
     gini,
-    damage_yi,
-    Fi_edges,
+    Omega,
+    omega_yi,
+    redistribution_amount,
     uniform_redistribution,
-    target_subsidy,
+    Fi_edges,
     tol=LOOSE_EPSILON,
     initial_guess=None,
 ):
     """
-    Find Fmin in (0, 1) such that progressive redistribution yields target_subsidy.
+    Find Fmin in (0, 1) such that progressive redistribution yields target subsidy amount.
 
     Uses analytical Lorenz curve integration instead of numerical quadrature,
     with stepwise interpolation for climate damage.
@@ -315,14 +339,16 @@ def find_Fmin_analytical(
         Gross income per capita before damage.
     gini : float
         Gini coefficient.
-    damage_yi : ndarray
+    Omega : float
+        Aggregate climate damage fraction.
+    omega_yi : ndarray
         Damage values at quadrature points (length N).
-    Fi_edges : ndarray
-        Interval boundaries for stepwise damage (length N+1).
+    redistribution_amount : float
+        Per-capita redistribution amount (target subsidy).
     uniform_redistribution : float
         Uniform per-capita redistribution amount.
-    target_subsidy : float
-        Target subsidy amount to distribute.
+    Fi_edges : ndarray
+        Interval boundaries for stepwise damage (length N+1).
     tol : float, optional
         Tolerance for root finding (default LOOSE_EPSILON).
     initial_guess : float, optional
@@ -331,12 +357,13 @@ def find_Fmin_analytical(
     Returns
     -------
     float
-        Fmin value such that progressive redistribution yields target_subsidy.
+        Fmin value such that progressive redistribution yields target subsidy amount.
     """
+
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_yi * bin_widths)))
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi * bin_widths)))
 
     def subsidy_minus_target(Fmin):
         # Lorenz contribution from Pareto distribution
@@ -347,10 +374,10 @@ def find_Fmin_analytical(
         # Fast damage calculation using pre-computed cumulative integrals
         # Find which bin Fmin is in
         bin_idx = np.searchsorted(Fi_edges, Fmin, side='right') - 1
-        bin_idx = np.clip(bin_idx, 0, len(damage_yi) - 1)
+        bin_idx = np.clip(bin_idx, 0, len(omega_yi) - 1)
 
         # Damage at Fmin is constant within bin (stepwise function)
-        damage_at_Fmin = damage_yi[bin_idx]
+        damage_at_Fmin = omega_yi[bin_idx]
 
         # Integral from 0 to Fmin = cumulative up to bin start + partial bin
         if Fmin <= Fi_edges[0]:
@@ -362,14 +389,14 @@ def find_Fmin_analytical(
             damage_integral = damage_cumulative[bin_idx]
             # Add partial contribution from within the bin
             partial_width = Fmin - Fi_edges[bin_idx]
-            damage_integral += damage_yi[bin_idx] * partial_width
+            damage_integral += omega_yi[bin_idx] * partial_width
 
         damage_part = Fmin * damage_at_Fmin - damage_integral
 
         # Subsidy amount (uniform redistribution cancels out)
         subsidy_amount = lorenz_part + damage_part
 
-        return subsidy_amount - target_subsidy
+        return subsidy_amount - redistribution_amount
 
     # Use secant method if we have a good initial guess, otherwise fall back to brentq
     if initial_guess is not None and 0.0 < initial_guess < 0.999999:
