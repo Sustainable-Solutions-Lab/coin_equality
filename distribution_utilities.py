@@ -88,7 +88,7 @@ _first_call_diagnostics_printed = False
 _call_counter = 0
 
 
-def y_of_F_after_damage(F, Fmin, Fmax, y_mean_before_damage, damage_prev_F, uniform_redistribution, gini):
+def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, uniform_tax_rate, uniform_redistribution, gini):
     """
     Compute income y(F) from the equation:
 
