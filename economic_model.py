@@ -569,10 +569,6 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
 
         Omega = np.sum(Fwi * Omega_yi) / y_net  # Recalculate Omega based on current damage distribution (relative to net income after abatement and previous damage)
 
-        # Calculate Omega_yi for next timestep (damage at each F as fraction of aggregate y_damaged)
-        # This makes the code internally consistent - passing ratios instead of mixed amounts and ratios
-        Omega_y = climate_damage_yi / y_damaged
-
     #========================================================================================
     # mitigation carbon climate
     
@@ -714,6 +710,9 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
     # Always return climate damage distribution for use in next time step
     results['Omega_yi'] = Omega_yi  # Store damage fractions (dimensionless) at quadrature points for next timestep
     results['Omega'] = Omega  # Store aggregate climate damage fraction for next timestep
+    results['Omega_base'] = Omega_base  # Store base damage from temperature for next timestep
+    results['Fmax'] = Fmax  # Store maximum income rank for next timestep's initial guess
+    results['Fmin'] = Fmin  # Store minimum income rank for next timestep's initial guess
 
     t_end = time.time()
     _timing_stats['total_time'] += t_end - t_start
