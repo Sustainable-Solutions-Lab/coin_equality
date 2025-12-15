@@ -146,7 +146,7 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
 
     # Compute y_mean_before_damage and damage_prev_F from the new parameters
     y_mean_before_damage = y_gross * (1.0 - uniform_tax_rate)
-    damage_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
+    omega_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
 
     # Pareto-Lorenz shape parameter from Gini
     a = (1.0 + 1.0 / gini) / 2.0
@@ -155,9 +155,9 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
     dLdF = (1.0 - 1.0 / a) * (1.0 - F) ** (-1.0 / a)
 
     # Compute income
-    result = y_mean_before_damage * dLdF + uniform_redistribution - damage_prev_F
+    y_net_F = (y_mean_before_damage * dLdF + uniform_redistribution) * (1.0 - omega_prev_F) 
 
-    return result
+    return y_net_F
 
 
 #========================================================================================
@@ -222,13 +222,11 @@ def find_Fmax(
     float
         Fmax value such that progressive taxation yields target tax amount.
     """
-    # Calculate target tax from components
-    target_tax = abateCost_amount + redistribution_amount
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi * bin_widths)))
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(y_gross * omega_yi * bin_widths)))
     total_damage_integral = damage_cumulative[-1]
 
     def tax_revenue_minus_target(Fmax):
@@ -244,7 +242,7 @@ def find_Fmax(
         bin_idx = np.clip(bin_idx, 0, len(omega_yi) - 1)
 
         # Damage at Fmax is constant within bin (stepwise function)
-        damage_at_Fmax = omega_yi[bin_idx]
+        omega_at_Fmax = omega_yi[bin_idx]
 
         # Integral from Fmax to 1.0 = total - integral from 0 to Fmax
         if Fmax <= Fi_edges[0]:
