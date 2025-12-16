@@ -76,7 +76,7 @@ The differential equation solver uses climate damage from the previous timestep 
 
 **Setup and Previous Damage:**
 1. **Fwi** = wi / 2.0 (transform quadrature weights from xi-space [-1,1] to F-space [0,1])
-2. **Omega_prev** from previous timestep's aggregate climate damage fraction
+2. **Omega_prev_scaled** from previous timestep's aggregate climate damage fraction
 3. **Omega_yi_prev** = damage fractions at quadrature points from previous timestep
 
 **Current Timestep Production:**

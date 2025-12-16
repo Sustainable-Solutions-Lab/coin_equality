@@ -420,7 +420,7 @@ def write_results_csv(results, output_dir, run_name='', filename='results.csv'):
         'uniform_tax_rate': ('Uniform tax rate', 'dimensionless'),
         'aggregate_utility': ('Aggregate utility from integration', 'dimensionless'),
         'Omega_base': ('Base damage from temperature before income adjustment', 'dimensionless'),
-        'Omega_prev': ('Climate damage from previous timestep (lagged)', 'dimensionless'),
+        'Omega_prev_scaled': ('Climate damage from previous timestep (lagged)', 'dimensionless'),
         'y_damaged': ('Per-capita income after climate damage', '$/person/yr'),
         'climate_damage': ('Per capita climate damage', '$/person/yr'),
         'consumption': ('Per capita consumption', '$/person/yr'),
