@@ -576,7 +576,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
         if not income_dependent_aggregate_damage and income_dependent_damage_distribution:
             # Only rescale if we have income-dependent distribution but want aggregate to match temperature-based damage
             # Rescale to match Omega_base * y_net (consistent with uniform distribution case)
-            total_climate_damage_pre_scale = np.sum(Fwi * Omega_yi)
+            # total_climate_damage_pre_scale = sum of (damage_fraction * income) across all groups
+            total_climate_damage_pre_scale = np.sum(Fwi * y_net_yi * Omega_yi)
             y_net_aggregate = np.sum(Fwi * y_net_yi)
             if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
                 Omega_yi = Omega_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
