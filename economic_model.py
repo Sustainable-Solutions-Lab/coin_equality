@@ -9,7 +9,7 @@ import numpy as np
 import time
 from scipy.special import roots_legendre
 from distribution_utilities import (
-    y_of_F_after_damage,
+    y_net_of_F,
     find_Fmax,
     find_Fmin,
     L_pareto,
@@ -260,11 +260,14 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
     # Be careful when used not to produce effective Omega values >= 1.0
     Omega_base = psi1 * delta_T + psi2 * (delta_T ** 2)
     
-    # Convert damage fractions from previous timestep to per-capita damage amounts
-    # Omega_yi_prev is damage as fraction of previous y_damaged_prev_scaled, scale by current y_damaged_prev_scaled and new Omega_base.
+    # Scale damage fractions from previous timestep by ratio of current to previous base damage
+    # Omega_yi_prev contains damage fractions from previous timestep, scale by (Omega_base/Omega_base_prev)
     if Omega_base_prev > EPSILON:
         Omega_prev_scaled = Omega_prev * (Omega_base/Omega_base_prev)
-        omega_yi_prev_scaled = Omega_yi_prev * (Omega_base/Omega_base_prev) 
+        omega_yi_prev_scaled = Omega_yi_prev * (Omega_base/Omega_base_prev)
+        # Clip scaled values to ensure they remain valid damage fractions
+        Omega_prev_scaled = np.clip(Omega_prev_scaled, 0.0, 1.0 - EPSILON)
+        omega_yi_prev_scaled = np.clip(omega_yi_prev_scaled, 0.0, 1.0 - EPSILON)
     else:
         Omega_prev_scaled = 0.0
         omega_yi_prev_scaled = np.zeros_like(Omega_yi_prev)
@@ -356,8 +359,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             # Only find Fmin if there's actually something to redistribute
             if redistribution_amount > EPSILON:
                 t_before_fmin = time.time()
-                Fmin = find_Fmin(
-                    y_gross * (1.0 - lambda_abate), gini, Omega_prev_scaled, omega_yi_prev_scaled,
+                Fmin = find_Fmin(1.0 - EPSILON,
+                    y_gross, gini, Omega_prev_scaled, omega_yi_prev_scaled,
                     redistribution_amount, 0.0, uniform_tax_rate, Fi_edges,
                     initial_guess=Fmin_prev,
                 )
@@ -387,8 +390,8 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
                 t_before_fmax = time.time()
 
                 # Find value of Fmax at which, if everyone F>Fmax would make same amount as people at Fmax, that would generate the target amount.
-                Fmax = find_Fmax(
-                    Fmin, y_gross, gini, Omega_prev_scaled, omega_yi_prev_scaled,
+                Fmax = find_Fmax(Fmin, 
+                    y_gross, gini, Omega_prev_scaled, omega_yi_prev_scaled,
                     redistribution_amount, uniform_redistribution_amount, abateCost_amount, Fi_edges,
                     initial_guess=Fmax_prev,
                 )
@@ -440,14 +443,14 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
                     fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
                     y_net_yi[i] = y_damaged_yi_min * fraction_below
 
-            min_y_net = y_of_F_after_damage(
+            min_y_net = y_net_of_F(
                 Fmin, Fmin, Fmax,
-                y_gross, Omega_prev_scaled, omega_yi_prev_scaled, Fi_edges,
+                y_gross, omega_yi_prev_scaled, Fi_edges,
                 uniform_tax_rate, uniform_redistribution_amount, gini,
             )
             min_consumption = min_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
-            climate_damage_min = min_y_net * Omega_base * (min_y_net/y_net_reference)**(-y_damage_distribution_exponent)
+            omega_min = Omega_base * (min_y_net/y_net_reference)**(-y_damage_distribution_exponent)
 
             # Calculate utility for segment 1
             if eta == 1:
@@ -459,12 +462,12 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i+1] <= Fmin:
                     # Bin completely below Fmin
-                    Omega_yi[i] = climate_damage_min
+                    Omega_yi[i] = omega_min
                     utility_yi[i] = min_utility
                 elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
                     # Bin containing Fmin - weight by fraction below Fmin
                     fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
-                    Omega_yi[i] = climate_damage_min * fraction_below
+                    Omega_yi[i] = omega_min * fraction_below
                     utility_yi[i] = min_utility * fraction_below
 
         _timing_stats['segment1_time'] += time.time() - t_before_seg1
@@ -485,14 +488,14 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
                     fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
                     y_net_yi[i] = y_damaged_yi_max * fraction_above
 
-            max_y_net = y_of_F_after_damage(
+            max_y_net = y_net_of_F(
                 Fmax, Fmin, Fmax,
-                y_gross, Omega_prev_scaled, omega_yi_prev_scaled, Fi_edges,
+                y_gross, omega_yi_prev_scaled, Fi_edges,
                 uniform_tax_rate, uniform_redistribution_amount, gini,
             )
             max_consumption = max_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
-            climate_damage_max = max_y_net * Omega_base * (max_y_net/y_net_reference)**(-y_damage_distribution_exponent)
+            omega_max = Omega_base * (max_y_net/y_net_reference)**(-y_damage_distribution_exponent)
 
             # Calculate utility for segment 3
             if eta == 1:
@@ -504,12 +507,12 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             for i in range(len(Fi_edges) - 1):
                 if Fi_edges[i] >= Fmax:
                     # Bin completely above Fmax
-                    Omega_yi[i] = climate_damage_max
+                    Omega_yi[i] = omega_max
                     utility_yi[i] = max_utility
                 elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
                     # Bin containing Fmax - weight by fraction above Fmax
                     fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
-                    Omega_yi[i] = climate_damage_max * fraction_above
+                    Omega_yi[i] = omega_max * fraction_above
                     utility_yi[i] = max_utility * fraction_above
 
         _timing_stats['segment3_time'] += time.time() - t_before_seg3
@@ -518,19 +521,19 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
         t_before_seg2 = time.time()
         if Fmax - Fmin > EPSILON:
             # Calculate y_net for each bin in the middle segment
-            y_vals_Fi = y_of_F_after_damage(
+            y_vals_Fi = y_net_of_F(
                 Fi, Fmin, Fmax,
-                y_gross, Omega_prev_scaled, omega_yi_prev_scaled, Fi_edges,
+                y_gross, omega_yi_prev_scaled, Fi_edges,
                 uniform_tax_rate, uniform_redistribution_amount, gini,
             )
 
             # Calculate climate damage at quadrature points for next timestep
             if np.abs(y_damage_distribution_exponent) < EPSILON:
                 # Uniform damage
-                omega_yi_mid = np.full_like(y_vals_Fi, Omega_base * y_vals_Fi)
+                omega_yi_mid = np.full_like(y_vals_Fi, Omega_base)
             else:
                 # Income-dependent damage
-                omega_yi_mid = Omega_base * y_vals_Fi * (y_vals_Fi / y_net_reference) ** (-y_damage_distribution_exponent)
+                omega_yi_mid = Omega_base * (y_vals_Fi / y_net_reference) ** (-y_damage_distribution_exponent)
 
             # Calculate consumption and utility for middle segment
             consumption_vals = y_vals_Fi * (1 - s)
@@ -577,6 +580,9 @@ def calculate_tendencies(state, params, Omega_yi_prev, Omega_prev, Omega_base_pr
             y_net_aggregate = np.sum(Fwi * y_net_yi)
             if total_climate_damage_pre_scale > 0 and y_net_aggregate > 0:
                 Omega_yi = Omega_yi * (Omega_base * y_net_aggregate) / total_climate_damage_pre_scale
+
+        # Clip Omega_yi to valid range [0.0, 1.0 - EPSILON] since damage fractions cannot exceed 100%
+        Omega_yi = np.clip(Omega_yi, 0.0, 1.0 - EPSILON)
 
         # NOTE THAT THIS y_net SHOULD BE AN UPDATED y_net
         Omega = np.sum(Fwi * Omega_yi) / y_net  # Recalculate Omega based on current damage distribution (relative to net income after abatement and previous damage)

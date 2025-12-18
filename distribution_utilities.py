@@ -88,21 +88,17 @@ _first_call_diagnostics_printed = False
 _call_counter = 0
 
 
-def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, uniform_tax_rate, uniform_redistribution, gini):
+def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_prev, Fi_edges, uniform_tax_rate, uniform_redistribution, gini):
     """
-    Compute income y(F) from the equation:
+    Compute net income y_net(F) at population rank F after accounting for damage, tax, and redistribution.
 
-        y(F) = y_mean_before_damage * dL/dF(F; gini) + uniform_redistribution - damage_prev_F
+    Formula:
+        y_net(F) = (y_gross * (1.0 - uniform_tax_rate) * dL/dF(F; gini) + uniform_redistribution) * (1.0 - omega_prev_F)
 
     where:
-        y_mean_before_damage = y_gross * (1 - uniform_tax_rate)
-        damage_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
-
-    and the Lorenz curve is Pareto with Gini index gini:
-
-        L(F) = 1 - (1-F)^(1 - 1/a)
-        a    = (1 + 1/gini)/2
-        dL/dF(F) = (1 - 1/a) * (1 - F)^(-1/a)
+        omega_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)  [damage fraction at rank F]
+        dL/dF(F) = (1 - 1/a) * (1 - F)^(-1/a)  [Pareto-Lorenz derivative]
+        a = (1 + 1/gini)/2  [Pareto shape parameter]
 
     Parameters
     ----------
@@ -113,39 +109,36 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
     Fmax : float
         Maximum population rank for clipping F to [Fmin, Fmax].
     y_gross : float
-        Gross income per capita.
-    Omega : float
-        Aggregate climate damage fraction.
+        Gross income per capita before damage.
     omega_yi_prev : ndarray
-        Damage values at quadrature points from previous timestep.
+        Damage fractions at quadrature points from previous timestep.
     Fi_edges : ndarray
         Interval boundaries for stepwise damage interpolation.
     uniform_tax_rate : float
-        Uniform tax rate.
+        Uniform tax rate (fraction of gross income).
     uniform_redistribution : float
-        Additive constant redistribution amount.
+        Uniform per-capita redistribution amount.
     gini : float
         Gini index (0 < gini < 1).
 
     Returns
     -------
-    y_of_F : float or ndarray
-        Income y(F) evaluated at the given F values.
+    y_net : float or ndarray
+        Net income evaluated at the given F values.
     """
     global _first_call_diagnostics_printed, _call_counter
 
     # Increment call counter and print progress periodically
     _call_counter += 1
     if _call_counter % 100000 == 0:
-        print(f"  [y_of_F_after_damage call count = {_call_counter//100000} x 100,000]")
+        print(f"  [y_net_of_F call count = {_call_counter//100000} x 100,000]")
 
     F = np.clip(np.asarray(F), Fmin, Fmax)
     is_scalar = F.ndim == 0
     if is_scalar:
         F = F.reshape(1)
 
-    # Compute y_mean_before_damage and damage_prev_F from the new parameters
-    y_mean_before_damage = y_gross * (1.0 - uniform_tax_rate)
+    # Get damage fraction at rank F via stepwise interpolation
     omega_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
 
     # Pareto-Lorenz shape parameter from Gini
@@ -154,8 +147,8 @@ def y_of_F_after_damage(F, Fmin, Fmax, y_gross, Omega, omega_yi_prev, Fi_edges, 
     # dL/dF(F) for Pareto-Lorenz
     dLdF = (1.0 - 1.0 / a) * (1.0 - F) ** (-1.0 / a)
 
-    # Compute income
-    y_net_F = (y_mean_before_damage * dLdF + uniform_redistribution) * (1.0 - omega_prev_F) 
+    # Compute net income after damage
+    y_net_F = (y_gross * (1.0 - uniform_tax_rate) * dLdF + uniform_redistribution) * (1.0 - omega_prev_F)
 
     return y_net_F
 
@@ -315,6 +308,7 @@ def find_Fmax(
 
 
 def find_Fmin(
+    Fmax,
     y_gross,
     gini,
     Omega,
@@ -327,7 +321,7 @@ def find_Fmin(
     initial_guess=None,
 ):
     """
-    Find Fmin in (0, 1) such that progressive redistribution yields target subsidy amount.
+    Find Fmin in (0, Fmax) such that progressive redistribution yields target subsidy amount.
 
     Note that this function is only used when there is income-dependent redistribution, which means that
     the uniform redistribution term is zero.
@@ -345,6 +339,8 @@ def find_Fmin(
 
     Parameters
     ----------
+    Fmax : float
+        Upper boundary for income distribution (must have Fmin < Fmax).
     y_gross : float
         Gross income per capita before damage.
     gini : float
@@ -414,7 +410,7 @@ def find_Fmin(
         return subsidy_amount - redistribution_amount
 
     # Use secant method if we have a good initial guess, otherwise fall back to brentq
-    if initial_guess is not None and 0.0 < initial_guess < 0.999999:
+    if initial_guess is not None and 0.0 < initial_guess < Fmax - EPSILON:
         # First, check if the initial guess is already very close to the solution
         f_guess = subsidy_minus_target(initial_guess)
         if abs(f_guess) < tol:
@@ -424,18 +420,18 @@ def find_Fmin(
         try:
             # Secant needs two starting points; use initial_guess and a small perturbation
             x0 = initial_guess
-            x1 = initial_guess + 0.001 * 0.999999  # Small step towards the middle
-            x1 = np.clip(x1, EPSILON, 0.999999)
+            x1 = initial_guess + 0.001   # Small step towards the middle
+            x1 = np.clip(x1, EPSILON, Fmax - EPSILON)
 
             sol = root_scalar(subsidy_minus_target, method='secant', x0=x0, x1=x1, xtol=tol, maxiter=50)
-            if sol.converged and 0.0 <= sol.root <= 0.999999:
+            if sol.converged and 0.0 <= sol.root <= Fmax:
                 return sol.root
         except (ValueError, RuntimeError):
             pass  # Fall through to bracketing method
 
     # Fall back to bracketing method if secant fails or no initial guess
     left = 0.0
-    right = 0.999999
+    right = Fmax - EPSILON
     f_left = subsidy_minus_target(left)
     f_right = subsidy_minus_target(right)
 
