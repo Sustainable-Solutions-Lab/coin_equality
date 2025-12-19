@@ -220,10 +220,15 @@ def find_Fmax(
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
+    # damage(F) = omega(F) * [y_gross * dL/dF(F) + uniform_redistribution]
+    # Since omega is stepwise constant in each bin, integrate dL/dF over each bin
 
     # Note, since we are in this routine uniform_tax_rate is zero.
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum((y_gross + uniform_redistribution)  * omega_yi * bin_widths)))
+    # Integral of dL/dF from Fi_edges[i] to Fi_edges[i+1] = L(Fi_edges[i+1]) - L(Fi_edges[i])
+    lorenz_diff = np.diff(L_pareto(Fi_edges, gini))
+    damage_per_bin = omega_yi * (y_gross * lorenz_diff + uniform_redistribution * bin_widths)
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_per_bin)))
     total_damage_integral = damage_cumulative[-1]
 
     def tax_revenue_minus_target(Fmax):
@@ -370,8 +375,16 @@ def find_Fmin(
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
+    # damage(F) = omega(F) * [y_gross * (1 - tax) * dL/dF(F) + uniform_redist]
+    # Since omega is stepwise constant in each bin, integrate dL/dF over each bin
     bin_widths = np.diff(Fi_edges)
-    damage_cumulative = np.concatenate(([0.0], np.cumsum(omega_yi *( y_gross *  (1.0 - uniform_tax_rate) + uniform_redistribution) * bin_widths)))
+    # Integral of dL/dF from Fi_edges[i] to Fi_edges[i+1] = L(Fi_edges[i+1]) - L(Fi_edges[i])
+    lorenz_diff = np.diff(L_pareto(Fi_edges, gini))  # L at each edge
+    damage_per_bin = omega_yi * (
+        y_gross * (1.0 - uniform_tax_rate) * lorenz_diff +
+        uniform_redistribution * bin_widths
+    )
+    damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_per_bin)))
 
     def subsidy_minus_target(Fmin):
 
