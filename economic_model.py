@@ -344,10 +344,10 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
 
         # Find uniform tax amount
         if income_dependent_tax_policy:
-            tax_amount = abateCost_amount + redistribution_amount
-        else:
+            # No uniform tax
+            uniform_tax_rate = 0.0
+        else:   
             uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged_calc
-            Fmax = 1.0
 
         #------------------------------------------------------
         # Now we are going to do the income dependent part of the code
@@ -432,24 +432,23 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
         # Segment 1: Low-income earners receiving income-dependent redistribution [0, Fmin]
         t_before_seg1 = time.time()
         if Fmin > EPSILON:
-            omega_at_Fmin = stepwise_interpolate(Fmin, omega_yi_calc, Fi_edges)
-            y_damaged_yi_min = y_gross * L_pareto_derivative(Fmin, gini)*(1.0 - omega_at_Fmin)
-
-            # Set y_net_yi for bins below Fmin
-            for i in range(len(Fi_edges) - 1):
-                if Fi_edges[i+1] <= Fmin:
-                    # Bin completely below Fmin
-                    y_net_yi[i] = y_damaged_yi_min
-                elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
-                    # Bin containing Fmin - weight by fraction below Fmin
-                    fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
-                    y_net_yi[i] = y_damaged_yi_min * fraction_below
 
             min_y_net = y_net_of_F(
                 Fmin, Fmin, Fmax,
                 y_gross, omega_yi_calc, Fi_edges,
                 uniform_tax_rate, uniform_redistribution_amount, gini,
             )
+
+            # Set y_net_yi for bins below Fmin
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i+1] <= Fmin:
+                    # Bin completely below Fmin
+                    y_net_yi[i] = min_y_net
+                elif Fi_edges[i] < Fmin <= Fi_edges[i+1]:
+                    # Bin containing Fmin - weight by fraction below Fmin
+                    fraction_below = (Fmin - Fi_edges[i]) / Fwi[i]
+                    y_net_yi[i] = min_y_net * fraction_below
+
             min_consumption = min_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(0, Fmin, min_consumption, eta)
             omega_min = Omega_base * (min_y_net/y_net_reference)**(-y_damage_distribution_exponent)
@@ -477,24 +476,22 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
         # Segment 3: High-income earners paying income-dependent tax [Fmax, 1]
         t_before_seg3 = time.time()
         if 1.0 - Fmax > EPSILON:
-            omega_at_Fmax = stepwise_interpolate(Fmax, omega_yi_calc, Fi_edges)
-            y_damaged_yi_max = y_gross * L_pareto_derivative(Fmax, gini) * (1.0 - omega_at_Fmax)
-
-            # Set y_net_yi for bins above Fmax
-            for i in range(len(Fi_edges) - 1):
-                if Fi_edges[i] >= Fmax:
-                    # Bin completely above Fmax
-                    y_net_yi[i] = y_damaged_yi_max
-                elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
-                    # Bin containing Fmax - weight by fraction above Fmax
-                    fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
-                    y_net_yi[i] = y_damaged_yi_max * fraction_above
 
             max_y_net = y_net_of_F(
                 Fmax, Fmin, Fmax,
                 y_gross, omega_yi_calc, Fi_edges,
                 uniform_tax_rate, uniform_redistribution_amount, gini,
             )
+
+            # Set y_net_yi for bins above Fmax
+            for i in range(len(Fi_edges) - 1):
+                if Fi_edges[i] >= Fmax:
+                    # Bin completely above Fmax
+                    y_net_yi[i] = max_y_net
+                elif Fi_edges[i] < Fmax <= Fi_edges[i+1]:
+                    # Bin containing Fmax - weight by fraction above Fmax
+                    fraction_above = (Fi_edges[i+1] - Fmax) / Fwi[i]
+                    y_net_yi[i] = max_y_net * fraction_above
             max_consumption = max_y_net * (1 - s)
             aggregate_utility += crra_utility_interval(Fmax, 1.0, max_consumption, eta)
             omega_max = Omega_base * (max_y_net/y_net_reference)**(-y_damage_distribution_exponent)

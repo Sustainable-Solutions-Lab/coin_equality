@@ -88,7 +88,7 @@ _first_call_diagnostics_printed = False
 _call_counter = 0
 
 
-def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_prev, Fi_edges, uniform_tax_rate, uniform_redistribution, gini):
+def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_calc, Fi_edges, uniform_tax_rate, uniform_redistribution, gini):
     """
     Compute net income y_net(F) at population rank F after accounting for damage, tax, and redistribution.
 
@@ -96,7 +96,7 @@ def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_prev, Fi_edges, uniform_tax_rate
         y_net(F) = (y_gross * (1.0 - uniform_tax_rate) * dL/dF(F; gini) + uniform_redistribution) * (1.0 - omega_prev_F)
 
     where:
-        omega_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)  [damage fraction at rank F]
+        omega_prev_F = stepwise_interpolate(F, omega_yi_calc, Fi_edges)  [damage fraction at rank F]
         dL/dF(F) = (1 - 1/a) * (1 - F)^(-1/a)  [Pareto-Lorenz derivative]
         a = (1 + 1/gini)/2  [Pareto shape parameter]
 
@@ -110,7 +110,7 @@ def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_prev, Fi_edges, uniform_tax_rate
         Maximum population rank for clipping F to [Fmin, Fmax].
     y_gross : float
         Gross income per capita before damage.
-    omega_yi_prev : ndarray
+    omega_yi_calc : ndarray
         Damage fractions at quadrature points from previous timestep.
     Fi_edges : ndarray
         Interval boundaries for stepwise damage interpolation.
@@ -139,7 +139,7 @@ def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_prev, Fi_edges, uniform_tax_rate
         F = F.reshape(1)
 
     # Get damage fraction at rank F via stepwise interpolation
-    omega_prev_F = stepwise_interpolate(F, omega_yi_prev, Fi_edges)
+    omega_prev_F = stepwise_interpolate(F, omega_yi_calc, Fi_edges)
 
     # Pareto-Lorenz shape parameter from Gini
     a = (1.0 + 1.0 / gini) / 2.0
