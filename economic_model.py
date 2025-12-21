@@ -342,13 +342,6 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
             # Uniform redistribution
             uniform_redistribution_amount = redistribution_amount
 
-        # Find uniform tax amount
-        if income_dependent_tax_policy:
-            # No uniform tax
-            uniform_tax_rate = 0.0
-        else:   
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged_calc
-
         #------------------------------------------------------
         # Now we are going to do the income dependent part of the code
         # To simplify we are going to shift the calculation to discrete intervals of population
@@ -403,7 +396,7 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
                 Fmax = 1.0
         else:
             # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_net
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged_calc
             Fmax = 1.0
    
         # Compute consumption, aggregate utility for the Fmin and Fmax region, and at each of the Gauss-Legendre quadrature nodes
