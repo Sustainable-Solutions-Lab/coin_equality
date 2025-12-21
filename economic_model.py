@@ -354,9 +354,12 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
             # Only find Fmin if there's actually something to redistribute
             if redistribution_amount > EPSILON:
                 t_before_fmin = time.time()
+                # Find Fmin: everyone pays uniform_tax_rate on Lorenz income,
+                # then those below Fmin receive untaxed subsidy to reach Fmin income level
+                # This ensures continuity at Fmin (no perverse incentives)
                 Fmin = find_Fmin(1.0 - EPSILON,
                     y_gross, gini, Omega_calc, omega_yi_calc,
-                    redistribution_amount, 0.0, uniform_tax_rate, Fi_edges,
+                    redistribution_amount, uniform_tax_rate, Fi_edges,
                     initial_guess=Fmin_prev,
                 )
                 _timing_stats['find_Fmin_time'] += time.time() - t_before_fmin
@@ -384,10 +387,13 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
 
                 t_before_fmax = time.time()
 
-                # Find value of Fmax at which, if everyone F>Fmax would make same amount as people at Fmax, that would generate the target amount.
-                Fmax = find_Fmax(Fmin, 
+                # Find Fmax based on post-damage Lorenz income only (no taxes, no redistributions)
+                # This defines WHO pays progressive tax based on income rank thresholds
+                # Note: find_Fmax always uses uniform_redistribution=0.0 because
+                # Fmax determines "who pays" not "how much" (that's determined by tax rates)
+                Fmax = find_Fmax(Fmin,
                     y_gross, gini, Omega_calc, omega_yi_calc,
-                    redistribution_amount, uniform_redistribution_amount, abateCost_amount, Fi_edges,
+                    redistribution_amount, abateCost_amount, Fi_edges,
                     initial_guess=Fmax_prev,
                 )
                 _timing_stats['find_Fmax_time'] += time.time() - t_before_fmax
@@ -426,6 +432,9 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
         t_before_seg1 = time.time()
         if Fmin > EPSILON:
 
+            # People below Fmin pay uniform tax on Lorenz income, then receive untaxed subsidy
+            # The subsidy lifts them to the income level at Fmin
+            # This ensures continuity: no perverse incentive to be just below Fmin
             min_y_net = y_net_of_F(
                 Fmin, Fmin, Fmax,
                 y_gross, omega_yi_calc, Fi_edges,

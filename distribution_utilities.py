@@ -93,7 +93,9 @@ def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_calc, Fi_edges, uniform_tax_rate
     Compute net income y_net(F) at population rank F after accounting for damage, tax, and redistribution.
 
     Formula:
-        y_net(F) = (y_gross * (1.0 - uniform_tax_rate) * dL/dF(F; gini) + uniform_redistribution) * (1.0 - omega_prev_F)
+        y_net(F) = y_gross * dL/dF(F; gini) * (1.0 - omega_prev_F) * (1.0 - uniform_tax_rate) + uniform_redistribution
+
+        Order: Lorenz → Damage → Tax → Redistribution (untaxed)
 
     where:
         omega_prev_F = stepwise_interpolate(F, omega_yi_calc, Fi_edges)  [damage fraction at rank F]
@@ -147,8 +149,8 @@ def y_net_of_F(F, Fmin, Fmax, y_gross, omega_yi_calc, Fi_edges, uniform_tax_rate
     # dL/dF(F) for Pareto-Lorenz
     dLdF = (1.0 - 1.0 / a) * (1.0 - F) ** (-1.0 / a)
 
-    # Compute net income after damage
-    y_net_F = (y_gross * (1.0 - uniform_tax_rate) * dLdF + uniform_redistribution) * (1.0 - omega_prev_F)
+    # Compute net income: Lorenz → Damage → Tax → Redistribution (untaxed)
+    y_net_F = y_gross * dLdF * (1.0 - omega_prev_F) * (1.0 - uniform_tax_rate) + uniform_redistribution
 
     return y_net_F
 
@@ -165,7 +167,6 @@ def find_Fmax(
     Omega,
     omega_yi,
     redistribution_amount,
-    uniform_redistribution,
     abateCost_amount,
     Fi_edges,
     tol=LOOSE_EPSILON,
@@ -173,6 +174,12 @@ def find_Fmax(
 ):
     """
     Find Fmax in [Fmin, 1) such that progressive taxation yields target tax amount.
+
+    Fmax is calculated based on post-damage Lorenz income only (no taxes, no redistributions).
+    This ensures that Fmax defines income thresholds based on the underlying distribution,
+    avoiding circular dependencies with tax and redistribution calculations.
+
+    uniform_redistribution is always 0.0 for this calculation.
 
     If we are here it is because there is income-dependent tax.
 
@@ -217,6 +224,9 @@ def find_Fmax(
     float
         Fmax value such that progressive taxation yields target tax amount.
     """
+
+    # Always use 0.0 for uniform_redistribution when finding Fmax (see README.md Tax and Redistribution Logic)
+    uniform_redistribution = 0.0
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
@@ -319,7 +329,6 @@ def find_Fmin(
     Omega,
     omega_yi,
     redistribution_amount,
-    uniform_redistribution,
     uniform_tax_rate,
     Fi_edges,
     tol=LOOSE_EPSILON,
@@ -328,8 +337,12 @@ def find_Fmin(
     """
     Find Fmin in (0, Fmax) such that progressive redistribution yields target subsidy amount.
 
-    Note that this function is only used when there is income-dependent redistribution, which means that
-    the uniform redistribution term is zero.
+    Fmin is calculated considering:
+    - Everyone pays tax on their Lorenz income (including those below Fmin)
+    - Redistribution subsidy is NOT taxed (it comes from taxes)
+    - Fmin defines the threshold where subsidy reaches zero
+
+    This ensures continuity at Fmin and no perverse incentives.
 
     Uses analytical Lorenz curve integration instead of numerical quadrature,
     with stepwise interpolation for climate damage.
@@ -373,17 +386,19 @@ def find_Fmin(
         Fmin value such that progressive redistribution yields target subsidy amount.
     """
 
+    # Redistribution subsidy is not taxed (it comes from taxes)
+    # But everyone pays tax on their Lorenz income, so uniform_tax_rate is passed as parameter
+    uniform_redistribution = 0.0
+
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
-    # damage(F) = omega(F) * [y_gross * (1 - tax) * dL/dF(F) + uniform_redist]
+    # damage(F) = omega(F) * y_gross * dL/dF(F) * (1 - tax)
+    # Redistribution is added AFTER damage, so it's not included here
     # Since omega is stepwise constant in each bin, integrate dL/dF over each bin
     bin_widths = np.diff(Fi_edges)
     # Integral of dL/dF from Fi_edges[i] to Fi_edges[i+1] = L(Fi_edges[i+1]) - L(Fi_edges[i])
     lorenz_diff = np.diff(L_pareto(Fi_edges, gini))  # L at each edge
-    damage_per_bin = omega_yi * (
-        y_gross * (1.0 - uniform_tax_rate) * lorenz_diff +
-        uniform_redistribution * bin_widths
-    )
+    damage_per_bin = omega_yi * y_gross * lorenz_diff * (1.0 - uniform_tax_rate)
     damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_per_bin)))
 
     def subsidy_minus_target(Fmin):
@@ -401,7 +416,8 @@ def find_Fmin(
         bin_idx = np.clip(bin_idx, 0, len(omega_yi) - 1)
 
         # Omega_yi at Fmin is constant within bin (stepwise function)
-        damage_at_Fmin = y_gross * (1.0 - uniform_tax_rate) * L_pareto_derivative(Fmin, gini) * omega_yi[bin_idx]
+        # Order: Lorenz → Damage → Tax
+        damage_at_Fmin = y_gross * L_pareto_derivative(Fmin, gini) * omega_yi[bin_idx] * (1.0 - uniform_tax_rate)
 
         # Integral from 0 to Fmin = cumulative up to bin start + partial bin
         if Fmin <= Fi_edges[0]:

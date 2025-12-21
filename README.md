@@ -158,6 +158,66 @@ Abatement costs reduce production available for consumption and investment. The 
 
 These strategies ensure the model has well-defined, explicit calculations at each timestep while maintaining consistency between individual-level (rank-dependent) and aggregate quantities.
 
+#### Tax and Redistribution Logic
+
+**Key Principle: Separation of Tax and Redistribution**
+
+Taxes and redistributions are independent operations applied sequentially to income:
+
+```
+y_net(F) = [y_lorenz(F) * (1 - omega(F))] * (1 - tax_rate(F)) + redistribution(F)
+```
+
+where:
+- `y_lorenz(F) = y_gross * dL/dF(F)` is the Lorenz curve income at rank F
+- `omega(F)` is the climate damage fraction at rank F
+- `tax_rate(F)` is either uniform or income-dependent (progressive)
+- `redistribution(F)` is either uniform or income-dependent (targeted)
+
+**Important:**
+- **Taxes are applied to Lorenz income** (before redistribution is added)
+- **Redistribution is not taxed** (it is added after tax)
+- **Everyone can both pay tax AND receive redistribution**
+- The tax on the redistribution subsidy is zero
+
+**Finding Fmin (Income-Dependent Redistribution Threshold):**
+
+Fmin is the maximum income rank receiving targeted redistribution. It is calculated to match the redistribution budget based on **post-damage Lorenz income only** (no taxes, no uniform redistribution):
+
+```
+target_subsidy = ∫₀^Fmin [y_post_damage(Fmin) - y_post_damage(F)] dF
+```
+
+where `y_post_damage(F) = y_gross * dL/dF(F) * (1 - omega(F))`.
+
+**Finding Fmax (Income-Dependent Tax Threshold):**
+
+Fmax is the minimum income rank paying progressive taxation. It is calculated to match the tax revenue target based on **post-damage Lorenz income only** (no taxes, no uniform redistribution):
+
+```
+target_tax = ∫_Fmax^1 [y_post_damage(F) - y_post_damage(Fmax)] dF
+```
+
+**Rationale:**
+- Fmin and Fmax define income thresholds based on the underlying income distribution
+- They determine **who** pays/receives, not **how much** (that's determined by tax_rate and redistribution)
+- Including taxes or redistributions in their calculation would create circular dependencies
+- Climate damage affects the income distribution, so omega(F) must be included
+
+**Examples:**
+
+*Example 1: Uniform tax, income-dependent redistribution*
+- Tax: Everyone pays 2% of their Lorenz income
+- Redistribution: Bottom 20% (Fmin=0.2) lifted to income level at F=0.2
+- Person at F=0.1: pays 2% tax on Lorenz income, receives redistribution subsidy
+- Person at F=0.5: pays 2% tax on Lorenz income, receives no redistribution
+
+*Example 2: Income-dependent tax, uniform redistribution*
+- Tax: Top 10% (Fmax=0.9) pay progressive tax
+- Redistribution: Everyone receives equal per-capita payment
+- Person at F=0.5: pays no progressive tax, receives uniform redistribution
+- Person at F=0.95: pays progressive tax, also receives uniform redistribution
+
 ### Core Components
 
 #### 1. Economic Model (Solow-Swann Growth)
