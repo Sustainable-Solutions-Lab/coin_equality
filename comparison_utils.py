@@ -259,10 +259,10 @@ def load_control_points(directories):
 
 def load_results_csvs(directories):
     """
-    Load results.csv from multiple directories.
+    Load optimization_results.csv from multiple directories.
 
-    Only includes cases where results.csv exists. Prints warning for
-    directories missing results.csv.
+    Only includes cases where optimization_results.csv exists. Prints warning for
+    directories missing optimization_results.csv.
 
     Parameters
     ----------
@@ -273,7 +273,7 @@ def load_results_csvs(directories):
     -------
     dict
         {case_name: pd.DataFrame, ...}
-        Only includes cases where results.csv exists.
+        Only includes cases where optimization_results.csv exists.
         Each DataFrame contains model results with columns:
         t, y, K, T_atm, E_cum, etc.
 
@@ -285,11 +285,11 @@ def load_results_csvs(directories):
     data = {}
     for directory in directories:
         case_name = generate_case_name(directory)
-        csv_path = directory / 'results.csv'
-        if csv_path.exists():
-            data[case_name] = pd.read_csv(csv_path)
+        results_files = list(directory.glob('*_optimization_results.csv'))
+        if results_files:
+            data[case_name] = pd.read_csv(results_files[0])
         else:
-            print(f"Warning: results.csv not found in {directory}, skipping results comparison for this case")
+            print(f"Warning: optimization_results.csv not found in {directory}, skipping results comparison for this case")
 
     return data
 
