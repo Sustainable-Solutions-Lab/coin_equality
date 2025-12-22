@@ -230,14 +230,13 @@ def find_Fmax(
 
     # Pre-compute cumulative damage integrals at bin edges for fast lookup
     # damage_cumulative[i] = integral of damage from 0 to Fi_edges[i]
-    # damage(F) = omega(F) * [y_gross * dL/dF(F) + uniform_redistribution]
+    # Order: Lorenz → Damage → Tax (uniform tax rate is zero in this routine)
+    # damage(F) = omega(F) * y_gross * dL/dF(F)
     # Since omega is stepwise constant in each bin, integrate dL/dF over each bin
-
-    # Note, since we are in this routine uniform_tax_rate is zero.
     bin_widths = np.diff(Fi_edges)
     # Integral of dL/dF from Fi_edges[i] to Fi_edges[i+1] = L(Fi_edges[i+1]) - L(Fi_edges[i])
     lorenz_diff = np.diff(L_pareto(Fi_edges, gini))
-    damage_per_bin = omega_yi * (y_gross * lorenz_diff + uniform_redistribution * bin_widths)
+    damage_per_bin = omega_yi * y_gross * lorenz_diff
     damage_cumulative = np.concatenate(([0.0], np.cumsum(damage_per_bin)))
     total_damage_integral = damage_cumulative[-1]
 
@@ -270,8 +269,8 @@ def find_Fmax(
 
         damage_integral = total_damage_integral - damage_integral_0_to_Fmax
 
-        # Damage at Fmax based on income at Fmax
-        damage_at_Fmax = (y_gross * L_pareto_derivative(Fmax, gini) + uniform_redistribution) * omega_at_Fmax
+        # Damage at Fmax based on income at Fmax (uniform redistribution is excluded; tax is zero here)
+        damage_at_Fmax = y_gross * L_pareto_derivative(Fmax, gini) * omega_at_Fmax
         damage_part = damage_integral - (1.0 - Fmax) * damage_at_Fmax
 
         # Tax revenue (uniform redistribution cancels out)

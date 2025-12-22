@@ -342,6 +342,12 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
             # Uniform redistribution
             uniform_redistribution_amount = redistribution_amount
 
+        # Pre-compute uniform tax rate when policy is uniform so Fmin uses taxed income
+        if income_dependent_tax_policy:
+            uniform_tax_rate = 0.0
+        else:
+            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged_calc
+
         #------------------------------------------------------
         # Now we are going to do the income dependent part of the code
         # To simplify we are going to shift the calculation to discrete intervals of population
@@ -374,7 +380,6 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
  
         # For income-dependent tax, find Fmax such that tax matches target
         if income_dependent_tax_policy:
-            uniform_tax_rate = 0.0
             # Only find Fmax if there's actually something to tax
             if tax_amount > EPSILON:
                 # We want to find the value of Fmax such that if everyone above Fmax made
@@ -401,8 +406,7 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
                 # No tax amount, so no income-dependent taxation
                 Fmax = 1.0
         else:
-            # Uniform tax
-            uniform_tax_rate = (abateCost_amount + redistribution_amount) / y_damaged_calc
+            # Uniform tax already computed
             Fmax = 1.0
    
         # Compute consumption, aggregate utility for the Fmin and Fmax region, and at each of the Gauss-Legendre quadrature nodes
