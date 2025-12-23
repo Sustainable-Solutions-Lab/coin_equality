@@ -107,7 +107,7 @@ def print_timing_stats():
     print(f"{'='*80}\n")
 
 
-def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
+def calculate_tendencies(state, params, omega_yi_Omega_base_ratio_prev, Omega_Omega_base_ratio_prev, xi, xi_edges, wi, Fmax_prev=None, Fmin_prev=None, store_detailed_output=True):
     """
     Calculate time derivatives and all derived variables.
 
@@ -139,15 +139,13 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
         - 'Gini_restore': Rate of restoration to gini (yr^-1)
         - 'fract_gdp': Fraction of GDP available for redistribution and abatement
         - 'f': Fraction allocated to abatement vs redistribution
-    omega_yi_prev : np.ndarray
-        Climate damage fractions at quadrature points from previous timestep (length N_QUAD).
-        Units: dimensionless (damage at each rank F as fraction of aggregate y_damaged_calc).
-        Scaled by current y_damaged_calc to get per-capita damage in dollars.
+    omega_yi_Omega_base_ratio_prev : np.ndarray
+        Ratio of climate damage fractions to base damage from previous timestep (length N_QUAD).
+        Units: dimensionless. Multiply by current Omega_base to get current damage fractions.
         Used to compute current income distribution with lagged damage to avoid circular dependency.
-    Omega_prev : float
-        Aggregate climate damage fraction from previous timestep.
-    Omega_base_prev : float
-        Base climate damage from temperature at previous timestep (before income adjustment).
+    Omega_Omega_base_ratio_prev : float
+        Ratio of aggregate damage to base damage from previous timestep.
+        Multiply by current Omega_base to get current aggregate damage fraction.
     xi : np.ndarray
         Gauss-Legendre quadrature nodes on [-1, 1] (length N_QUAD)
     xi_edges : np.ndarray
@@ -166,8 +164,7 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
     dict
         Dictionary containing:
         - Tendencies: 'dK_dt', 'dEcum_dt'
-        - Climate damage: 'omega_yi' (damage fractions at quadrature points), 'Omega_base' (base damage)
-          for use in next time step's lagged damage calculation
+        - Climate damage ratios for next timestep: 'omega_yi_Omega_base_ratio', 'Omega_Omega_base_ratio'
         - All intermediate variables: Y_gross, delta_T, Omega, Y_net, y_net, redistribution,
           mu, Lambda, AbateCost, U, E
 
@@ -257,23 +254,19 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
     # Base damage from temperature (capped just below 1.0 to avoid division by zero)
     # Be careful when used not to produce effective Omega values >= 1.0
     Omega_base = psi1 * delta_T + psi2 * (delta_T ** 2)
-    
+
     if income_dependent_damage_distribution:
-        # Scale damage fractions from previous timestep by ratio of current to previous base damage
-        # omega_yi_prev contains damage fractions from previous timestep, scale by (Omega_base/Omega_base_prev)
-        if Omega_base_prev > EPSILON:
-            Omega_calc = Omega_prev * (Omega_base/Omega_base_prev)
-            omega_yi_calc = omega_yi_prev * (Omega_base/Omega_base_prev)
-            # Clip scaled values to ensure they remain valid damage fractions
-            Omega_calc = np.clip(Omega_calc, 0.0, 1.0 - EPSILON)
-            omega_yi_calc = np.clip(omega_yi_calc, 0.0, 1.0 - EPSILON)
-        else:
-            Omega_calc = 0.0
-            omega_yi_calc = np.zeros_like(omega_yi_prev)
+        # Reconstruct damage fractions from ratios stored at previous timestep
+        # Multiply stored ratios by current Omega_base to get current damage estimates
+        Omega_calc = Omega_Omega_base_ratio_prev * Omega_base
+        omega_yi_calc = omega_yi_Omega_base_ratio_prev * Omega_base
+        # Clip scaled values to ensure they remain valid damage fractions
+        Omega_calc = np.clip(Omega_calc, 0.0, 1.0 - EPSILON)
+        omega_yi_calc = np.clip(omega_yi_calc, 0.0, 1.0 - EPSILON)
     else:
         # No income-dependent damage distribution, use aggregate damage only
         Omega_calc = Omega_base
-        omega_yi_calc = np.full_like(omega_yi_prev, Omega_base)
+        omega_yi_calc = np.full_like(omega_yi_Omega_base_ratio_prev, Omega_base)
         y_damage_distribution_exponent = 0.0 # set damage exponent to zero if no income-dependent damage
 
     # Eq 1.1: Gross production per capita (Cobb-Douglas)
@@ -724,10 +717,14 @@ def calculate_tendencies(state, params, omega_yi_prev, Omega_prev, Omega_base_pr
         'dEcum_dt': e * L,
     })
 
-    # Always return climate damage distribution for use in next time step
-    results['omega_yi'] = omega_yi  # Store damage fractions (dimensionless) at quadrature points for next timestep
-    results['Omega'] = Omega  # Store aggregate climate damage fraction for next timestep
-    results['Omega_base'] = Omega_base  # Store base damage from temperature for next timestep
+    # Always return climate damage ratios for use in next time step
+    # Store ratios of damage to base damage, so next timestep can scale by new Omega_base
+    if Omega_base > EPSILON:
+        results['omega_yi_Omega_base_ratio'] = omega_yi / Omega_base
+        results['Omega_Omega_base_ratio'] = Omega / Omega_base
+    else:
+        results['omega_yi_Omega_base_ratio'] = np.zeros_like(omega_yi)
+        results['Omega_Omega_base_ratio'] = 0.0
     results['Fmax'] = Fmax  # Store maximum income rank for next timestep's initial guess
     results['Fmin'] = Fmin  # Store minimum income rank for next timestep's initial guess
 
@@ -797,10 +794,9 @@ def integrate_model(config, store_detailed_output=True):
     # We want edges from -1 to +1, so: -1 + cumsum(wi) goes from -1+wi[0] to 1
     xi_edges = np.concatenate(([-1.0], -1.0 + np.cumsum(wi)))  # length n_quad + 1
 
-    # Initialize climate damage fractions and Omega from previous timestep for first timestep
-    omega_yi_prev = np.zeros(n_quad)  # Damage fractions (dimensionless) at quadrature points
-    Omega_calc = 0.0
-    Omega_base_prev = 0.0
+    # Initialize climate damage ratios for first timestep
+    omega_yi_Omega_base_ratio_prev = np.ones(n_quad)  # Ratio of damage to base damage at quadrature points
+    Omega_Omega_base_ratio_prev = 1.0  # Ratio of aggregate damage to base damage
 
     # Initialize Fmax and Fmin from previous timestep (None for first timestep)
     Fmax_prev = None
@@ -893,9 +889,9 @@ def integrate_model(config, store_detailed_output=True):
         params = evaluate_params_at_time(t, config)
 
         # Calculate all variables and tendencies at current time
-        # Pass omega_yi_prev and Omega_calc to use lagged damage (avoids circular dependency)
+        # Pass damage ratios from previous timestep to use lagged damage (avoids circular dependency)
         # Pass Fmax_prev and Fmin_prev to speed up root finding
-        outputs = calculate_tendencies(state, params, omega_yi_prev, Omega_calc, Omega_base_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
+        outputs = calculate_tendencies(state, params, omega_yi_Omega_base_ratio_prev, Omega_Omega_base_ratio_prev, xi, xi_edges, wi, Fmax_prev, Fmin_prev, store_detailed_output)
 
         # Always store variables needed for objective function
         results['U'][i] = outputs['U']
@@ -963,10 +959,9 @@ def integrate_model(config, store_detailed_output=True):
             # do not allow cumulative emissions to go negative, making it colder than the initial condition
             state['Ecum'] = max(0.0, state['Ecum'] + dt * outputs['dEcum_dt'])
 
-            # Update climate damage fractions and Omega for next time step (lagged damage approach)
-            omega_yi_prev = outputs['omega_yi']
-            Omega_calc = outputs['Omega']
-            Omega_base_prev = outputs['Omega_base']
+            # Update climate damage ratios for next time step (lagged damage approach)
+            omega_yi_Omega_base_ratio_prev = outputs['omega_yi_Omega_base_ratio']
+            Omega_Omega_base_ratio_prev = outputs['Omega_Omega_base_ratio']
 
             # Update Fmax and Fmin for next time step (speeds up root finding)
             Fmax_prev = outputs.get('Fmax')
