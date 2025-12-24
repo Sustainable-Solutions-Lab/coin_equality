@@ -219,6 +219,14 @@ python run_parallel.py "config_*.json"
 
 Each optimization runs on its own CPU core, with progress logged to `terminal_output.txt` in each output directory.
 
+To override parameters for every launched job, append `--key value` pairs exactly as you would for `run_optimization.py`; dot notation targets nested fields (e.g., `--optimization_params.max_evaluations 100`). Example:
+
+```bash
+python run_parallel.py "config_*.json" --optimization_params.max_evaluations 100 --run_name quick_test
+```
+
+All overrides are applied to every configuration file matched by the patterns.
+
 ## Project Structure
 
 ```
