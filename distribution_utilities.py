@@ -25,13 +25,6 @@ def a_from_G(G):
     return (1.0 + 1.0/G) / 2.0
 
 
-def G_from_a(a):
-    """Gini coefficient G from Pareto index a (inverse of a_from_G)."""
-    if a <= 1:
-        raise ValueError("a must be > 1 for finite Gini.")
-    return 1.0 / (2.0 * a - 1.0)
-
-
 def L_pareto(F, G):
     """Lorenz curve at F for Pareto-Lorenz distribution with Gini coefficient G."""
     a = a_from_G(G)
@@ -47,25 +40,10 @@ def L_pareto(F, G):
     return result[()] if scalar_input else result
 
 
-def F_pareto(L, G):
-    """Rank F where Lorenz curve equals L for Pareto-Lorenz distribution with Gini coefficient G."""
-    a = a_from_G(G)
-    return 1.0 - (1.0 - L)**(a / (a - 1.0))
-
-
 def L_pareto_derivative(F, G):
     """Derivative of Lorenz curve dL/dF at F for Pareto-Lorenz distribution with Gini coefficient G."""
     a = a_from_G(G)
     return (1.0 - 1.0/a) * (1.0 - F)**(-1.0/a)
-
-
-def crossing_rank_from_G(Gini_initial, G2):
-    """Find rank where two Pareto-Lorenz curves with different Gini coefficients cross."""
-    if Gini_initial == G2:
-        return 0.5
-    r = ((1.0 - G2) * (1.0 + Gini_initial)) / ((1.0 + G2) * (1.0 - Gini_initial))
-    s = ((1.0 + Gini_initial) * (1.0 + G2)) / (2.0 * (G2 - Gini_initial))
-    return 1.0 - (r ** s)
 
 
 def _phi(r):
@@ -588,92 +566,3 @@ def stepwise_integrate(F0, F1, yi, Fi_edges):
     return integral
 
 
-def invert_step_integral(Fi_edges, y, yint):
-    """
-    Given a step function defined by edges Fi_edges and heights y,
-    return F such that integral_0^F y(x) dx = yint.
-
-    Parameters
-    ----------
-    Fi_edges : ndarray
-        Interval boundaries (length N+1).
-    y : ndarray
-        Values at quadrature points (length N).
-    yint : float
-        Target integral value.
-
-    Returns
-    -------
-    float
-        Value F such that ∫_0^F y(x) dx = yint.
-    """
-    Fi_edges = np.asarray(Fi_edges)
-    y = np.asarray(y)
-
-    # Bin widths
-    widths = Fi_edges[1:] - Fi_edges[:-1]
-
-    # Contribution of each bin to the total integral
-    bin_integrals = widths * y
-
-    # Cumulative integral
-    cum = np.cumsum(bin_integrals)
-
-    # Case: yint is 0 → answer is 0
-    if yint <= 0:
-        return Fi_edges[0]
-
-    # Case: yint exceeds whole integral
-    if yint >= cum[-1]:
-        return Fi_edges[-1]
-
-    # Find the bin where cumulative integral first exceeds yint
-    k = np.searchsorted(cum, yint)
-
-    # Integral up to the start of bin k
-    prev = cum[k-1] if k > 0 else 0.0
-
-    # Remaining integral needed inside bin k
-    rem = yint - prev
-
-    # Linear solve inside the bin
-    F = Fi_edges[k] + rem / y[k]
-
-    return F
-
-
-#========================================================================================
-# CRRA utility integration
-#========================================================================================
-
-def crra_utility_interval(F0, F1, c_mean, eta):
-    """
-    Utility of a constant consumption level c over the interval [F0, F1].
-
-    u(c) = c^(1-eta)/(1-eta)    if eta != 1
-           ln(c)                if eta == 1
-
-    Parameters
-    ----------
-    F0 : float
-        Lower rank bound.
-    F1 : float
-        Upper rank bound.
-    c_mean : float
-        Constant consumption level.
-    eta : float
-        CRRA coefficient.
-
-    Returns
-    -------
-    float
-        Utility value.
-    """
-    width = F1 - F0
-    if width < 0 or F0 < 0 or F1 > 1:
-        raise ValueError("Require 0 <= F0 <= F1 <= 1.")
-
-    if eta == 1:
-        return width * np.log(c_mean)
-    else:
-        return width * (c_mean**(1-eta)) / (1-eta)

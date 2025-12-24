@@ -14,7 +14,6 @@ from distribution_utilities import (
     find_Fmin,
     L_pareto,
     L_pareto_derivative,
-    crra_utility_interval,
     stepwise_interpolate,
     stepwise_integrate
 )
